@@ -131,13 +131,8 @@ button:hover {
 }
 
 .brand-sub {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
   margin-top: 2px;
   font-size: 10px;
-  letter-spacing: 0.06em;
 }
 
 .brand-sub .powered {
@@ -146,10 +141,6 @@ button:hover {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   font-weight: 600;
-}
-
-.brand-sub .sep {
-  color: var(--border);
 }
 
 .pills {
@@ -179,6 +170,10 @@ button:hover {
 
 .pill.live-blip {
   animation: blip 1.4s ease-in-out infinite;
+}
+
+.pill.muted-pill {
+  opacity: 0.7;
 }
 
 @keyframes blip {
@@ -260,7 +255,7 @@ button:hover {
 .circuit-panel h2,
 .panel h2,
 .scope-panel h2,
-.feed-panel h2 {
+.stream-board h2 {
   margin: 0 0 6px;
   font-size: 10px;
   text-transform: uppercase;
@@ -390,30 +385,16 @@ button:hover {
   background: rgba(0, 0, 0, 0.4);
 }
 
-.stream-ticker .item.accept {
-  border-color: var(--border-hot);
-  color: var(--phosphor);
-}
-.stream-ticker .item.reject {
-  border-color: #802010;
-  color: var(--bad);
-}
-.stream-ticker .item.wait {
-  border-color: #a06020;
-  color: var(--warn);
-}
-
 .scope-panel {
   border: 1px solid var(--border);
   background: var(--panel);
   padding: 8px 10px;
   box-shadow: inset 0 0 40px rgba(255, 100, 0, 0.06);
-  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .scope-panel.scope-hot {
   border-color: var(--border-hot);
-  box-shadow: 0 0 20px rgba(255, 140, 20, 0.25), inset 0 0 40px rgba(255, 100, 0, 0.1);
+  box-shadow: 0 0 20px rgba(255, 140, 20, 0.25);
 }
 
 .scope-head {
@@ -425,7 +406,6 @@ button:hover {
 .scope-mode {
   font-size: 10px;
   color: var(--phosphor);
-  letter-spacing: 0.06em;
 }
 
 .scope-canvas {
@@ -444,68 +424,111 @@ button:hover {
   color: var(--muted);
 }
 
-.feed-panel {
+/* Visual stream board */
+.stream-board {
   border: 1px solid var(--border);
   background: var(--panel);
-  padding: 8px 10px;
+  padding: 8px 10px 10px;
   flex: 1;
-  min-height: 180px;
+  min-height: 120px;
+}
+
+.stream-board-head {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
+  align-items: baseline;
 }
 
-.feed-meta {
-  float: right;
+.stream-stats {
+  font-size: 10px;
   color: var(--muted);
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
 }
 
-.feed-scroll {
+.stream-rail {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 28px;
+  margin: 8px 0 10px;
+  padding: 4px;
+  background: #080401;
+  border: 1px solid #3a2008;
+}
+
+.rail-cell {
   flex: 1;
-  overflow: auto;
-  font-size: 11px;
-  line-height: 1.5;
+  min-width: 3px;
+  height: 6px;
+  background: rgba(255, 140, 40, 0.12);
+  border-radius: 1px;
+  transition: height 0.2s, background 0.2s;
 }
 
-.feed-line {
-  padding: 2px 0;
-  border-bottom: 1px solid rgba(92, 51, 16, 0.3);
+.rail-cell.quiet {
+  height: 6px;
+  background: rgba(255, 140, 40, 0.15);
 }
 
-.feed-line .ts {
+.rail-cell.signal {
+  height: 18px;
+  background: rgba(255, 176, 0, 0.75);
+  box-shadow: 0 0 6px rgba(255, 160, 40, 0.45);
+}
+
+.rail-cell.accept {
+  height: 22px;
+  background: #ffcc66;
+  box-shadow: 0 0 8px rgba(255, 200, 80, 0.6);
+}
+
+.rail-cell.reject {
+  height: 14px;
+  background: rgba(255, 80, 40, 0.7);
+}
+
+.stream-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  max-width: 100%;
+}
+
+.chip-ts {
   color: var(--muted);
 }
 
-.feed-line.accept {
-  color: var(--phosphor);
-  text-shadow: 0 0 6px rgba(255, 176, 0, 0.25);
-}
-.feed-line.reject {
-  color: var(--bad);
-}
-.feed-line.info {
+.chip.quiet {
   color: var(--text-dim);
 }
-.feed-line.markout {
-  color: var(--amber-hot);
+
+.chip.accept {
+  border-color: var(--border-hot);
+  color: var(--phosphor);
 }
-.feed-line.wait {
+
+.chip.reject {
+  border-color: #802010;
+  color: var(--bad);
+}
+
+.chip.wait {
+  border-color: #a06020;
   color: var(--warn);
 }
 
-.cursor-blink::after {
-  content: "█";
-  animation: blink 1s step-end infinite;
-  color: var(--phosphor);
-  margin-left: 3px;
-}
-
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
+.chip.markout {
+  border-color: var(--border-hot);
+  color: var(--amber-hot);
 }
 
 .panel {
