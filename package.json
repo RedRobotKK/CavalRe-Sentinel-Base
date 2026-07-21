@@ -4,7 +4,8 @@
   "private": true,
   "description": "Capital-safety-first UniswapX filler and autonomous system on Base",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "src/*"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
