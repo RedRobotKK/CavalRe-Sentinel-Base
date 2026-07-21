@@ -43,7 +43,7 @@ async function loadJsonl(filePath, { limit = 500 } = {}) {
     try {
       records.push(JSON.parse(line));
     } catch {
-      // skip corrupt line
+      /* skip */
     }
   }
   return { totalLines: lines.length, records };
@@ -57,6 +57,12 @@ function summarize(records) {
   let accepts = 0;
   let rejects = 0;
   let waits = 0;
+
+  // Markout-based W/L (Amount-safe: bps already computed as integer/string)
+  let wins = 0;
+  let losses = 0;
+  let markoutSum = 0;
+  let markoutN = 0;
 
   for (const r of records) {
     byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
@@ -75,7 +81,21 @@ function summarize(records) {
     byClass[oc] = (byClass[oc] ?? 0) + 1;
     const reason = r.reason ?? "?";
     byReason[reason] = (byReason[reason] ?? 0) + 1;
+
+    if (r.kind === "markout" || r.markoutBps != null || r.context?.markoutBps != null) {
+      const raw = r.markoutBps ?? r.context?.markoutBps;
+      const bps = Number(raw);
+      if (Number.isFinite(bps)) {
+        markoutN += 1;
+        markoutSum += bps;
+        if (bps >= 0) wins += 1;
+        else losses += 1;
+      }
+    }
   }
+
+  const decided = accepts + rejects + waits;
+  const labeled = wins + losses;
 
   return {
     n: records.length,
@@ -86,6 +106,18 @@ function summarize(records) {
     byAction,
     byClass,
     byReason,
+    book: {
+      acceptRateBps: decided > 0 ? Math.round((accepts * 10000) / decided) : null,
+      markoutSample: markoutN,
+      wins,
+      losses,
+      hitRateBps: labeled > 0 ? Math.round((wins * 10000) / labeled) : null,
+      meanMarkoutBps: markoutN > 0 ? Math.round(markoutSum / markoutN) : null,
+      note:
+        markoutN === 0
+          ? "insufficient_markout_sample"
+          : "markout_labeled",
+    },
   };
 }
 
@@ -119,12 +151,31 @@ const PRIMITIVES = [
   { id: "computeEdgeBps", layer: "strategy", desc: "(refOut - resolvedOut) / refOut" },
   { id: "QuoterV2 ref", layer: "mainnet", desc: "Base eth_call reference cost" },
   { id: "UniswapX poll", layer: "mainnet", desc: "Dutch_V3 open orders Base" },
-  { id: "LocalSigner", layer: "wallet", desc: "high-risk; unused in dry-run harness" },
+  { id: "LocalSigner", layer: "wallet", desc: "Node-only; never in browser" },
 ];
+
+function walletStatus() {
+  const addr = process.env.SENTINEL_ADDRESS ?? null;
+  return {
+    mode: "dry-run",
+    liveSigning: false,
+    browserKeys: false,
+    addressConfigured: Boolean(addr),
+    address: addr,
+    primitives: ["LocalSigner", "BIP-39/44", "ERC-20 encode", "destroy()"],
+    note: "Wallet connects via Node/env for live phase — not MetaMask in this desk. Set SENTINEL_ADDRESS to display public address only.",
+  };
+}
 
 async function handle(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "http://127.0.0.1:5173");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  // also allow alternate vite ports
+  const origin = req.headers.origin;
+  if (origin && /^http:\/\/127\.0\.0\.1:51\d{2}$/.test(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+
   if (req.method === "OPTIONS") {
     res.writeHead(204);
     res.end();
@@ -141,9 +192,9 @@ async function handle(req, res) {
         endpoints: [
           "GET /health",
           "GET /meta",
+          "GET /wallet",
           "GET /journals",
           "GET /journals/latest?limit=300",
-          "GET /journals/:file/records",
         ],
       });
       return;
@@ -164,7 +215,13 @@ async function handle(req, res) {
         risk: RISK_DEFAULTS,
         goNoGo: GO_NO_GO,
         primitives: PRIMITIVES,
+        wallet: walletStatus(),
       });
+      return;
+    }
+
+    if (url.pathname === "/wallet") {
+      json(res, walletStatus());
       return;
     }
 
