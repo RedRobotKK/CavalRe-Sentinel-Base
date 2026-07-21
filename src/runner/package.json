@@ -14,7 +14,8 @@
     "@cavalre/core": "*",
     "@cavalre/risk-engine": "*",
     "@cavalre/journal": "*",
-    "@cavalre/uniswapx-base": "*"
+    "@cavalre/uniswapx-base": "*",
+    "@cavalre/strategy": "*"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

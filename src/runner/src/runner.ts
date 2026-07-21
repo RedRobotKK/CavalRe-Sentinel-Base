@@ -1,6 +1,15 @@
-import type { Amount } from "@cavalre/core";
+import { amountToString } from "@cavalre/core";
 import { pollOpenOrders } from "@cavalre/uniswapx-base";
 import type { ParsedOrder } from "@cavalre/uniswapx-base";
+import {
+  classifyOrder,
+  isTradableClass,
+  resolveOrderAmounts,
+  computeEdgeBps,
+  heuristicToxicity,
+  decideFill,
+  DutchDecayError,
+} from "@cavalre/strategy";
 import type {
   RunnerConfig,
   RunnerDeps,
@@ -9,13 +18,8 @@ import type {
 } from "./types.js";
 
 /**
- * One dry-run (or future live) cycle:
- * 1. Poll open UniswapX orders on Base
- * 2. Journal parse rejections
- * 3. For each valid order, ask RiskEngine
- * 4. Journal accept / reject / halt
- *
- * In dry-run mode nothing is signed or broadcast.
+ * Compliant dry-run cycle (JS/Cumberland bar):
+ * classify → decay resolve → compute edge → toxicity → risk → policy → feature journal
  */
 export async function runCycle(
   deps: RunnerDeps,
@@ -24,16 +28,16 @@ export async function runCycle(
   const mode: RunnerMode = config.mode ?? "dry-run";
 
   if (mode === "live") {
-    // Explicit guard — live path is not implemented yet.
     throw new Error("live_mode_not_enabled");
   }
+
+  const nowSec = config.nowSec ?? Math.floor(Date.now() / 1000);
 
   const poll = await pollOpenOrders({
     fetchFn: config.fetchFn,
     limit: config.pollLimit ?? 20,
   });
 
-  // Journal parse-level rejections
   for (const r of poll.rejections) {
     deps.journal.append({
       kind: "quote_rejected",
@@ -45,7 +49,8 @@ export async function runCycle(
 
   const acceptedOrders: ParsedOrder[] = [];
   let accepted = 0;
-  let rejected = 0;
+  let rejected = poll.rejections.length;
+  let waited = 0;
 
   if (deps.risk.isHalted()) {
     deps.journal.append({
@@ -58,50 +63,151 @@ export async function runCycle(
       fetchedAt: poll.fetchedAt,
       rawCount: poll.rawCount,
       accepted: 0,
-      rejected: poll.rejections.length,
+      rejected,
+      waited: 0,
       halted: true,
       acceptedOrders: [],
     };
   }
 
   for (const order of poll.orders) {
-    // Use input size as the notional proxy for risk checks in v0.1.
-    const size: Amount = order.inputStart;
-    const decision = deps.risk.checkPositionSize(size);
+    const orderClass = classifyOrder(order);
 
-    if (!decision.allowed) {
+    if (!isTradableClass(orderClass)) {
       rejected += 1;
       deps.journal.append({
         kind: "quote_rejected",
-        reason: decision.reason ?? "risk_reject",
+        reason: `class_not_tradable:${orderClass}`,
         ref: order.orderHash,
-        amount: size,
-        context: {
-          stage: "risk",
-          dryRun: true,
-          inputToken: order.inputToken,
-          outputToken: order.outputToken,
-        },
+        context: featureContext({
+          stage: "classify",
+          order,
+          orderClass,
+          policyAction: "reject",
+        }),
       });
       continue;
     }
 
-    // Dry-run accept: journal only, no execution.
-    accepted += 1;
-    acceptedOrders.push(order);
-    deps.journal.append({
-      kind: "quote_accepted",
-      reason: "dry_run_accept",
-      ref: order.orderHash,
-      amount: size,
-      context: {
-        stage: "risk",
-        dryRun: true,
-        inputToken: order.inputToken,
-        outputToken: order.outputToken,
-        orderType: order.orderType,
-      },
+    let resolved;
+    try {
+      resolved = resolveOrderAmounts(order, nowSec);
+    } catch (e) {
+      rejected += 1;
+      const reason =
+        e instanceof DutchDecayError ? e.message : "resolve_failed";
+      deps.journal.append({
+        kind: "quote_rejected",
+        reason,
+        ref: order.orderHash,
+        context: featureContext({
+          stage: "resolve",
+          order,
+          orderClass,
+          policyAction: "reject",
+        }),
+      });
+      continue;
+    }
+
+    // Reference cost: required for computed edge
+    let refOutput = 0n;
+    let edgeUndefined = true;
+    let edgeBps = 0;
+    if (config.referenceCostFn) {
+      refOutput = await config.referenceCostFn(order, resolved.input);
+      const edge = computeEdgeBps({
+        resolvedOutput: resolved.output,
+        refOutput,
+      });
+      edgeBps = edge.edgeBps;
+      edgeUndefined = edge.undefined;
+    }
+
+    if (edgeUndefined) {
+      rejected += 1;
+      deps.journal.append({
+        kind: "quote_rejected",
+        reason: "edge_undefined_no_reference_cost",
+        ref: order.orderHash,
+        amount: resolved.input,
+        context: featureContext({
+          stage: "edge",
+          order,
+          orderClass,
+          resolvedInput: resolved.input,
+          resolvedOutput: resolved.output,
+          refOutput,
+          edgeBps,
+          decayProgressBps: resolved.decayProgressBps,
+          policyAction: "reject",
+        }),
+      });
+      continue;
+    }
+
+    const toxicity = heuristicToxicity({
+      decayProgressBps: resolved.decayProgressBps,
+      edgeBpsVsAmm: edgeBps,
     });
+
+    // Risk on RESOLVED input size (decay applied first)
+    const riskDecision = deps.risk.checkPositionSize(resolved.input);
+
+    const fillDecision = decideFill({
+      notional: resolved.input,
+      edgeBps,
+      toxicity,
+      decayProgressBps: resolved.decayProgressBps,
+      riskAllowed: riskDecision.allowed,
+      riskReason: riskDecision.reason,
+    });
+
+    const ctx = featureContext({
+      stage: "policy",
+      order,
+      orderClass,
+      resolvedInput: resolved.input,
+      resolvedOutput: resolved.output,
+      refOutput,
+      edgeBps,
+      toxicity,
+      decayProgressBps: resolved.decayProgressBps,
+      policyAction: fillDecision.action,
+    });
+
+    if (fillDecision.action === "accept") {
+      accepted += 1;
+      acceptedOrders.push(order);
+      deps.journal.append({
+        kind: "quote_accepted",
+        reason: fillDecision.reason,
+        ref: order.orderHash,
+        amount: resolved.input,
+        amount2: resolved.output,
+        context: ctx,
+      });
+    } else if (fillDecision.action === "wait") {
+      waited += 1;
+      deps.journal.append({
+        kind: "info",
+        reason: fillDecision.reason,
+        ref: order.orderHash,
+        amount: resolved.input,
+        amount2: resolved.output,
+        context: ctx,
+      });
+    } else {
+      rejected += 1;
+      deps.journal.append({
+        kind: "quote_rejected",
+        reason: fillDecision.reason,
+        ref: order.orderHash,
+        amount: resolved.input,
+        amount2: resolved.output,
+        context: ctx,
+      });
+    }
   }
 
   return {
@@ -109,8 +215,42 @@ export async function runCycle(
     fetchedAt: poll.fetchedAt,
     rawCount: poll.rawCount,
     accepted,
-    rejected: rejected + poll.rejections.length,
+    rejected,
+    waited,
     halted: deps.risk.isHalted(),
     acceptedOrders,
+  };
+}
+
+function featureContext(p: {
+  stage: string;
+  order: ParsedOrder;
+  orderClass: string;
+  policyAction: string;
+  resolvedInput?: bigint;
+  resolvedOutput?: bigint;
+  refOutput?: bigint;
+  edgeBps?: number;
+  toxicity?: number;
+  decayProgressBps?: number;
+}): Record<string, string | boolean | null> {
+  return {
+    dryRun: true,
+    stage: p.stage,
+    orderClass: p.orderClass,
+    orderType: p.order.orderType,
+    inputToken: p.order.inputToken,
+    outputToken: p.order.outputToken,
+    policyAction: p.policyAction,
+    exclusiveFiller: p.order.exclusiveFiller,
+    decayProgressBps:
+      p.decayProgressBps !== undefined ? String(p.decayProgressBps) : null,
+    edgeBps: p.edgeBps !== undefined ? String(p.edgeBps) : null,
+    toxicity: p.toxicity !== undefined ? String(p.toxicity) : null,
+    resolvedInput:
+      p.resolvedInput !== undefined ? amountToString(p.resolvedInput) : null,
+    resolvedOutput:
+      p.resolvedOutput !== undefined ? amountToString(p.resolvedOutput) : null,
+    refOutput: p.refOutput !== undefined ? amountToString(p.refOutput) : null,
   };
 }

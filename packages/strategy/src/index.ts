@@ -15,3 +15,15 @@ export {
   type FillFeatures,
   type FillDecision,
 } from "./fill-policy.js";
+export {
+  classifyOrder,
+  isTradableClass,
+  type OrderClass,
+  type ClassifiableOrder,
+} from "./classify.js";
+export { computeEdgeBps, type EdgeInput, type EdgeResult } from "./edge.js";
+export {
+  resolveOrderAmounts,
+  type ResolvableOrder,
+  type ResolvedAmounts,
+} from "./resolve.js";

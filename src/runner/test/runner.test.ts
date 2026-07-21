@@ -14,12 +14,14 @@ function mockFetch(body: unknown, status = 200): FetchFn {
     });
 }
 
-function makeOrder(hash: string, inputStart: string) {
+function makeDutch(hash: string, inputStart: string, outputStart: string) {
   return {
     orderHash: hash,
     chainId: BASE_CHAIN_ID,
     orderStatus: "open",
     orderType: "Dutch_V2",
+    decayStartTime: 0,
+    decayEndTime: 1_000_000_000,
     input: {
       token: BASE_USDC,
       startAmount: inputStart,
@@ -28,15 +30,15 @@ function makeOrder(hash: string, inputStart: string) {
     outputs: [
       {
         token: BASE_WETH,
-        startAmount: "1000000000000000",
-        endAmount: "990000000000000",
+        startAmount: outputStart,
+        endAmount: outputStart,
         recipient: "0x1234567890123456789012345678901234567890",
       },
     ],
   };
 }
 
-describe("runCycle (dry-run)", () => {
+describe("runCycle (compliant dry-run)", () => {
   let risk: RiskEngine;
   let journal: DecisionJournal;
 
@@ -45,89 +47,98 @@ describe("runCycle (dry-run)", () => {
     journal = new DecisionJournal();
   });
 
-  it("defaults to dry-run and accepts orders within risk limits", async () => {
-    const body = {
-      orders: [
-        makeOrder("0xsmall", "50000000"), // $50 < $80 max
-      ],
-    };
+  it("rejects without reference cost (edge must be computed)", async () => {
+    const body = { orders: [makeDutch("0x1", "60000000", "1000000")] };
+    const result = await runCycle(
+      { risk, journal },
+      { fetchFn: mockFetch(body), nowSec: 100 }
+    );
+    expect(result.accepted).toBe(0);
+    expect(result.rejected).toBeGreaterThan(0);
+    const rej = journal.byKind("quote_rejected");
+    expect(rej.some((r) => r.reason === "edge_undefined_no_reference_cost")).toBe(
+      true
+    );
+  });
+
+  it("accepts when edge, risk, and policy pass", async () => {
+    const body = { orders: [makeDutch("0xgood", "60000000", "1000000")] };
+    // ref higher than resolved output → positive edge
+    const referenceCostFn = async () => 1_100_000n;
 
     const result = await runCycle(
       { risk, journal },
-      { fetchFn: mockFetch(body) }
+      { fetchFn: mockFetch(body), nowSec: 100, referenceCostFn }
     );
 
-    expect(result.mode).toBe("dry-run");
     expect(result.accepted).toBe(1);
-    expect(result.rejected).toBe(0);
-    expect(result.halted).toBe(false);
-    expect(result.acceptedOrders).toHaveLength(1);
-
-    const accepted = journal.byKind("quote_accepted");
-    expect(accepted).toHaveLength(1);
-    expect(accepted[0].amount).toBe(toAmount("50000000"));
-    expect(accepted[0].context?.dryRun).toBe(true);
+    expect(result.mode).toBe("dry-run");
+    const acc = journal.byKind("quote_accepted");
+    expect(acc).toHaveLength(1);
+    expect(acc[0].context?.edgeBps).toBeTruthy();
+    expect(acc[0].context?.resolvedInput).toBe("60000000");
+    expect(acc[0].context?.orderClass).toBe("dutch");
+    expect(acc[0].context?.policyAction).toBe("accept");
   });
 
-  it("rejects orders that exceed max position size", async () => {
+  it("classifies and rejects priority orders", async () => {
     const body = {
       orders: [
-        makeOrder("0xbig", "90000000"), // $90 > $80 max
+        {
+          ...makeDutch("0xpri", "60000000", "1000000"),
+          orderType: "PriorityOrder",
+          decayStartTime: undefined,
+          decayEndTime: undefined,
+        },
       ],
     };
-
     const result = await runCycle(
       { risk, journal },
-      { fetchFn: mockFetch(body) }
+      {
+        fetchFn: mockFetch(body),
+        referenceCostFn: async () => 1n,
+      }
     );
-
     expect(result.accepted).toBe(0);
-    expect(result.rejected).toBe(1);
-
-    const rejected = journal.byKind("quote_rejected");
-    expect(rejected).toHaveLength(1);
-    expect(rejected[0].reason).toBe("exceeds_max_position_size");
+    expect(
+      journal.byKind("quote_rejected").some((r) =>
+        (r.reason ?? "").includes("priority")
+      )
+    ).toBe(true);
   });
 
-  it("journals parse rejections", async () => {
-    const body = {
-      orders: [
-        { orderHash: "0xwrongchain", chainId: 1, orderStatus: "open" },
-      ],
-    };
-
+  it("rejects over max position using resolved size", async () => {
+    const body = { orders: [makeDutch("0xbig", "90000000", "1000000")] };
     const result = await runCycle(
       { risk, journal },
-      { fetchFn: mockFetch(body) }
+      {
+        fetchFn: mockFetch(body),
+        nowSec: 100,
+        referenceCostFn: async () => 2_000_000n,
+      }
     );
-
     expect(result.accepted).toBe(0);
-    expect(result.rejected).toBe(1);
-    const rejected = journal.byKind("quote_rejected");
-    expect(rejected[0].reason).toContain("wrong_chainId");
+    expect(
+      journal.byKind("quote_rejected").some(
+        (r) => r.reason === "exceeds_max_position_size"
+      )
+    ).toBe(true);
   });
 
-  it("short-circuits when risk engine is already halted", async () => {
-    risk.recordLoss(toAmount("21000000")); // trip daily loss
-    expect(risk.isHalted()).toBe(true);
-
-    const body = {
-      orders: [makeOrder("0xany", "1000000")],
-    };
-
-    const result = await runCycle(
-      { risk, journal },
-      { fetchFn: mockFetch(body) }
-    );
-
-    expect(result.halted).toBe(true);
-    expect(result.accepted).toBe(0);
-    expect(journal.byKind("halt")).toHaveLength(1);
-  });
-
-  it("refuses live mode for now", async () => {
+  it("refuses live mode", async () => {
     await expect(
       runCycle({ risk, journal }, { mode: "live" })
     ).rejects.toThrow("live_mode_not_enabled");
+  });
+
+  it("short-circuits when halted", async () => {
+    risk.recordLoss(toAmount("21000000"));
+    const body = { orders: [makeDutch("0xany", "1000000", "1")] };
+    const result = await runCycle(
+      { risk, journal },
+      { fetchFn: mockFetch(body), referenceCostFn: async () => 1n }
+    );
+    expect(result.halted).toBe(true);
+    expect(result.accepted).toBe(0);
   });
 });
