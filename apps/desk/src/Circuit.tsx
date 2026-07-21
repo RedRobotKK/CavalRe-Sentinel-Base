@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 type StageId =
   | "poll"
@@ -23,15 +23,17 @@ const STAGES: { id: StageId; label: string }[] = [
 
 const PATH = STAGES.map((s) => s.id);
 
-type IntentRow = {
+type Signal = {
+  id: string;
+  ts: string;
   ref: string;
   action: "accept" | "reject" | "wait";
   reason: string;
   orderClass: string;
   edgeBps: string;
   tox: string;
-  ts: string;
   stage: StageId;
+  seq?: number;
 };
 
 function stageFrom(r: any): StageId {
@@ -70,20 +72,27 @@ function build(records: any[]) {
   let accept = 0;
   let wait = 0;
   let reject = 0;
-
-  const byRef = new Map<string, IntentRow>();
+  const signals: Signal[] = [];
 
   for (const r of records) {
     if (r.reason === "cycle_heartbeat") {
       heartbeats += 1;
       lastRaw = Number(r.context?.raw ?? lastRaw);
-      // poll always "passes" as listen signal
       pass.poll += 1;
       continue;
     }
 
+    // only order-level / decision rows on the rolling log
+    if (
+      r.kind !== "quote_accepted" &&
+      r.kind !== "quote_rejected" &&
+      !(r.kind === "info" && r.context?.policyAction === "wait")
+    ) {
+      continue;
+    }
+
     const action =
-      (r.context?.policyAction as IntentRow["action"]) ??
+      (r.context?.policyAction as Signal["action"]) ??
       (r.kind === "quote_accepted"
         ? "accept"
         : r.kind === "info"
@@ -99,21 +108,20 @@ function build(records: any[]) {
 
     if (action === "reject") {
       drop[st] += 1;
-      // passed every stage before drop
       for (let i = 0; i < idx; i++) pass[PATH[i]] += 1;
     } else {
-      // accept or wait: passed full path through policy
       const end = action === "accept" ? PATH.length : PATH.indexOf("policy") + 1;
       for (let i = 0; i < end; i++) pass[PATH[i]] += 1;
       if (action === "accept") pass.book += 1;
     }
 
     const ref = String(r.ref ?? "");
-    if (!ref) continue;
-    byRef.set(ref, {
-      ref: ref.slice(0, 14),
+    signals.push({
+      id: `${r.seq ?? ""}-${r.ts ?? ""}-${ref}-${action}`,
+      ts: r.ts?.slice(11, 19) ?? "—",
+      ref: ref ? ref.slice(0, 14) : "—",
       action,
-      reason: String(r.reason ?? "").slice(0, 48),
+      reason: String(r.reason ?? "").slice(0, 56),
       orderClass: String(r.context?.orderClass ?? "—"),
       edgeBps:
         r.context?.edgeBps != null && r.context.edgeBps !== ""
@@ -123,20 +131,16 @@ function build(records: any[]) {
         r.context?.toxicity != null && r.context.toxicity !== ""
           ? String(r.context.toxicity)
           : "—",
-      ts: r.ts?.slice(11, 19) ?? "—",
       stage: st,
+      seq: r.seq,
     });
   }
 
-  const allIntents = [...byRef.values()];
-  // passes first (accept/wait), then rejects
-  const intents = [
-    ...allIntents.filter((i) => i.action !== "reject"),
-    ...allIntents.filter((i) => i.action === "reject"),
-  ].slice(0, 16);
+  // newest first rolling window
+  const log = [...signals].reverse().slice(0, 40);
 
   const seen = accept + wait + reject;
-  const signalsThrough = accept + wait; // non-terminal-reject outcomes
+  const signalsThrough = accept + wait;
 
   const funnel = STAGES.map((s) => ({
     ...s,
@@ -154,19 +158,30 @@ function build(records: any[]) {
     seen,
     signalsThrough,
     funnel,
-    intents,
+    log,
     live: records.length > 0,
   };
 }
 
 export function Circuit({
   records,
-  pulseKey: _pulseKey,
+  pulseKey,
 }: {
   records: any[];
   pulseKey: number;
 }) {
   const m = useMemo(() => build(records), [records]);
+  const logRef = useRef<HTMLDivElement>(null);
+  const prevLen = useRef(0);
+
+  // keep view pinned to newest when new signals arrive
+  useEffect(() => {
+    if (!logRef.current) return;
+    if (m.log.length >= prevLen.current) {
+      logRef.current.scrollTop = 0;
+    }
+    prevLen.current = m.log.length;
+  }, [m.log.length, pulseKey]);
 
   if (!m.live) {
     return (
@@ -209,7 +224,6 @@ export function Circuit({
         </div>
       </div>
 
-      {/* pass-through emphasis */}
       <div className="pass-banner">
         <span className="pass-banner-label">signals through policy</span>
         <span className="pass-banner-n">{m.signalsThrough}</span>
@@ -255,48 +269,37 @@ export function Circuit({
         </div>
       </div>
 
-      <div className="pipe-table-wrap">
-        <div className="pipe-table-head">
-          <span>Intent signals</span>
-          <span className="muted">pass rows first · {m.intents.length} shown</span>
+      {/* Rolling realtime intent log */}
+      <div className="intent-log">
+        <div className="intent-log-head">
+          <span>
+            Intent signals <span className="live-dot" /> LIVE
+          </span>
+          <span className="muted">newest first · rolling {m.log.length}/40</span>
         </div>
-        <table className="pipe-table">
-          <thead>
-            <tr>
-              <th>ts</th>
-              <th>ref</th>
-              <th>class</th>
-              <th>stage</th>
-              <th>signal</th>
-              <th>edge</th>
-              <th>reason</th>
-            </tr>
-          </thead>
-          <tbody>
-            {m.intents.map((it) => (
-              <tr key={it.ref + it.ts + it.action} className={it.action}>
-                <td>{it.ts}</td>
-                <td className="mono">{it.ref}</td>
-                <td>{it.orderClass}</td>
-                <td>{it.stage}</td>
-                <td>
-                  <span className={`tag ${it.action}`}>{it.action}</span>
-                </td>
-                <td>{it.edgeBps}</td>
-                <td className="reason" title={it.reason}>
-                  {it.reason}
-                </td>
-              </tr>
-            ))}
-            {m.intents.length === 0 && (
-              <tr>
-                <td colSpan={7} className="muted">
-                  channel open — no order-level signals yet (empty book or parse-only)
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <div className="intent-log-body" ref={logRef}>
+          {m.log.length === 0 && (
+            <div className="intent-log-empty">
+              channel open — waiting for order-level signals…
+            </div>
+          )}
+          {m.log.map((s, i) => (
+            <div
+              key={s.id}
+              className={`intent-line ${s.action}${i === 0 ? " newest" : ""}`}
+            >
+              <span className="il-ts">{s.ts}</span>
+              <span className={`il-action ${s.action}`}>{s.action}</span>
+              <span className="il-ref">{s.ref}</span>
+              <span className="il-class">{s.orderClass}</span>
+              <span className="il-stage">{s.stage}</span>
+              <span className="il-edge">e={s.edgeBps}</span>
+              <span className="il-reason" title={s.reason}>
+                {s.reason}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
