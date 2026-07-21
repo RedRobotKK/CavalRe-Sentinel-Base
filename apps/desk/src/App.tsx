@@ -8,6 +8,8 @@ import {
   ReasonBars,
 } from "./charts";
 import { Circuit } from "./Circuit";
+import { ShaderBackdrop } from "./gl/ShaderBackdrop";
+import { CircuitThree } from "./gl/CircuitThree";
 
 type RecordRow = {
   seq?: number;
@@ -77,15 +79,20 @@ export function App() {
   const wallet = meta?.wallet;
   const go = meta?.goNoGo;
 
+  // 0..1 activity for shader (heartbeats + decisions)
+  const activity = Math.min(1, (summary?.n ?? 0) / 80);
+
   return (
     <div className="layout">
-      <header className="topbar">
+      <ShaderBackdrop activity={activity} />
+
+      <header className="topbar panel-rise">
         <div>
           <div className="brand">
             CAVALRE <span>SENTINEL</span> DESK
           </div>
           <div className="muted">
-            Phase {meta?.phase ?? "0.5"} · evidence book · live capital OFF
+            Phase {meta?.phase ?? "0.5"} · WebGL backdrop · Three.js circuit underlay
           </div>
         </div>
         <div className="pills">
@@ -110,11 +117,14 @@ export function App() {
         </div>
       )}
 
-      <Circuit records={records} pulseKey={pulseKey} />
+      <div className="circuit-shell panel-rise">
+        <CircuitThree pulseKey={pulseKey} />
+        <Circuit records={records} pulseKey={pulseKey} />
+      </div>
 
       <section className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
-        <div className="panel">
-          <h2>Go / No-Go (live from journals)</h2>
+        <div className="panel panel-rise">
+          <h2>Go / No-Go</h2>
           <div className="metric-row">
             <span>verdict</span>
             <span className={go?.verdict === "NO_GO" ? "bad" : "good"}>
@@ -134,14 +144,13 @@ export function App() {
                 }
               >
                 {g.status}
-                {g.detail ? ` · ${g.detail}` : ""}
               </span>
             </div>
           ))}
         </div>
 
-        <div className="panel">
-          <h2>Limits (RiskEngine)</h2>
+        <div className="panel panel-rise">
+          <h2>Limits</h2>
           {meta?.risk &&
             Object.entries(meta.risk).map(([k, v]) => (
               <div className="metric-row" key={k}>
@@ -151,21 +160,20 @@ export function App() {
             ))}
         </div>
 
-        <div className="panel">
+        <div className="panel panel-rise">
           <h2>Book quality</h2>
           <div className="metric-row">
             <span>accept rate</span>
             <span>{bpsPct(book?.acceptRateBps)}</span>
           </div>
           <div className="metric-row">
-            <span>markout sample</span>
+            <span>markout n</span>
             <span>{book?.markoutSample ?? 0}</span>
           </div>
           <div className="metric-row">
             <span>wins / losses</span>
             <span>
-              <span className="good">{book?.wins ?? 0}</span>
-              {" / "}
+              <span className="good">{book?.wins ?? 0}</span> /{" "}
               <span className="bad">{book?.losses ?? 0}</span>
             </span>
           </div>
@@ -173,96 +181,63 @@ export function App() {
             <span>hit rate</span>
             <span>{bpsPct(book?.hitRateBps)}</span>
           </div>
-          <div className="metric-row">
-            <span>mean markout bps</span>
-            <span>{book?.meanMarkoutBps ?? "—"}</span>
-          </div>
         </div>
 
-        <div className="panel">
-          <h2>Wallet readiness</h2>
+        <div className="panel panel-rise">
+          <h2>Wallet</h2>
           <div className="metric-row">
             <span>mode</span>
             <span>{wallet?.mode ?? "dry-run"}</span>
           </div>
           <div className="metric-row">
-            <span>live signing</span>
-            <span className="good">{wallet?.liveSigning ? "ON" : "OFF"}</span>
+            <span>signing</span>
+            <span className="good">OFF</span>
           </div>
           <div className="metric-row">
             <span>browser keys</span>
             <span className="good">NEVER</span>
           </div>
-          <div className="metric-row">
-            <span>address</span>
-            <span className="muted">
-              {wallet?.address
-                ? `${String(wallet.address).slice(0, 6)}…${String(wallet.address).slice(-4)}`
-                : "unset"}
-            </span>
-          </div>
         </div>
       </section>
 
       <section className="grid">
-        <div className="panel">
+        <div className="panel panel-rise">
           <h2>Funnel</h2>
-          <div className="metric-row">
-            <span>records</span>
-            <span className="big">{summary?.n ?? 0}</span>
-          </div>
           <FunnelChart records={records} />
         </div>
-        <div className="panel">
-          <h2>Cumulative decisions</h2>
+        <div className="panel panel-rise">
+          <h2>Timeline</h2>
           <TimelineChart records={records} />
         </div>
-        <div className="panel">
-          <h2>Edge distribution (bps)</h2>
+        <div className="panel panel-rise">
+          <h2>Edge bps</h2>
           <EdgeHistogram records={records} />
         </div>
-        <div className="panel">
-          <h2>Order class mix</h2>
+        <div className="panel panel-rise">
+          <h2>Class mix</h2>
           <ClassPie records={records} />
         </div>
       </section>
 
-      <section className="grid" style={{ gridTemplateColumns: "1.2fr 1fr" }}>
-        <div className="panel">
-          <h2>Top reject / wait reasons</h2>
-          <ReasonBars records={records} />
-        </div>
-        <div className="panel">
-          <h2>Primitives</h2>
-          {(meta?.primitives ?? []).slice(0, 6).map((p: any) => (
-            <div className="prim" key={p.id}>
-              <code>{p.id}</code>
-              <span className="muted">{p.desc}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
       <section className="main">
-        <aside className="side">
-          <h2>Journal files</h2>
+        <aside className="side panel-rise">
+          <h2>Reasons</h2>
+          <ReasonBars records={records} />
+          <h2 style={{ marginTop: 12 }}>Files</h2>
           <ul className="clean">
             {files.map((f) => (
               <li key={f.name}>
                 {f.name}
-                <div className="muted">
-                  {f.bytes} B · {f.mtime}
-                </div>
+                <div className="muted">{f.bytes} B</div>
               </li>
             ))}
-            {files.length === 0 && <li className="muted">No jsonl yet</li>}
           </ul>
-          <div className="muted" style={{ marginTop: 12 }}>
-            poll #{tick} · 3s
+          <div className="muted" style={{ marginTop: 8 }}>
+            poll #{tick}
           </div>
         </aside>
 
-        <div className="table-wrap">
+        <div className="table-wrap panel-rise">
           <h2>Decision tape</h2>
           <table>
             <thead>
@@ -273,9 +248,6 @@ export function App() {
                 <th>class</th>
                 <th>edgeBps</th>
                 <th>tox</th>
-                <th>decay</th>
-                <th>resolvedIn</th>
-                <th>refOut</th>
                 <th>ref</th>
               </tr>
             </thead>
@@ -288,34 +260,22 @@ export function App() {
                     : r.kind === "info"
                       ? "wait"
                       : r.kind === "markout"
-                        ? "markout"
+                        ? "wait"
                         : "reject");
                 return (
                   <tr key={`${r.seq}-${i}`} className={i < 3 ? "flash" : undefined}>
                     <td>{r.ts?.slice(11, 19) ?? ""}</td>
                     <td>
-                      <span className={`tag ${action === "markout" ? "wait" : action}`}>
-                        {action}
-                      </span>
+                      <span className={`tag ${action}`}>{action}</span>
                     </td>
-                    <td title={r.reason}>{r.reason?.slice(0, 32)}</td>
+                    <td title={r.reason}>{r.reason?.slice(0, 36)}</td>
                     <td>{String(r.context?.orderClass ?? "")}</td>
                     <td>{String(r.context?.edgeBps ?? "")}</td>
                     <td>{String(r.context?.toxicity ?? "")}</td>
-                    <td>{String(r.context?.decayProgressBps ?? "")}</td>
-                    <td>{String(r.context?.resolvedInput ?? r.amount ?? "")}</td>
-                    <td>{String(r.context?.refOutput ?? r.context?.markOutput ?? "")}</td>
                     <td title={r.ref}>{r.ref?.slice(0, 10)}</td>
                   </tr>
                 );
               })}
-              {newestFirst.length === 0 && (
-                <tr>
-                  <td colSpan={10} className="muted">
-                    Idle book — Phase 0.5 collects evidence over days.
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
