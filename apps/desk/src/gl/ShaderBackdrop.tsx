@@ -1,9 +1,6 @@
 import { useEffect, useRef } from "react";
 
-/**
- * Default full-viewport WebGL fragment shader.
- * No Three.js — one triangle, cheap uniforms, quant-desk calm.
- */
+/** Amber CRT-ish WebGL backdrop (Wyse 2026). */
 const VERT = `
 attribute vec2 position;
 void main() {
@@ -17,7 +14,6 @@ uniform vec2 u_res;
 uniform float u_time;
 uniform float u_activity;
 
-// value noise
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
@@ -36,32 +32,27 @@ void main() {
   vec2 uv = gl_FragCoord.xy / u_res;
   vec2 p = uv * vec2(u_res.x / u_res.y, 1.0);
 
-  // base
-  vec3 col = vec3(0.027, 0.035, 0.051);
+  vec3 col = vec3(0.04, 0.02, 0.01);
 
-  // soft radial vignette lights
-  float g1 = exp(-length(uv - vec2(0.12, 0.05)) * 3.2) * 0.12;
-  float g2 = exp(-length(uv - vec2(0.92, 0.08)) * 3.5) * 0.07;
-  col += vec3(0.12, 0.28, 0.55) * g1;
-  col += vec3(0.05, 0.35, 0.32) * g2;
+  float g1 = exp(-length(uv - vec2(0.5, 0.0)) * 2.2) * 0.14;
+  col += vec3(0.45, 0.22, 0.04) * g1;
 
-  // drifting noise field
-  float n = noise(p * 3.5 + vec2(u_time * 0.03, u_time * 0.02));
-  n += 0.5 * noise(p * 8.0 - vec2(u_time * 0.05, 0.0));
-  col += vec3(0.04, 0.07, 0.12) * n * (0.35 + 0.25 * u_activity);
+  float n = noise(p * 4.0 + vec2(u_time * 0.04, u_time * 0.02));
+  n += 0.45 * noise(p * 11.0 - vec2(u_time * 0.06, 0.0));
+  col += vec3(0.2, 0.1, 0.02) * n * (0.3 + 0.3 * u_activity);
 
-  // fine grid
-  vec2 grid = abs(fract(gl_FragCoord.xy / 28.0) - 0.5);
-  float line = 1.0 - smoothstep(0.0, 0.04, min(grid.x, grid.y));
-  col += vec3(0.08, 0.12, 0.18) * line * 0.22;
+  // phosphor grid
+  vec2 grid = abs(fract(gl_FragCoord.xy / 26.0) - 0.5);
+  float line = 1.0 - smoothstep(0.0, 0.035, min(grid.x, grid.y));
+  col += vec3(0.35, 0.18, 0.04) * line * 0.18;
 
-  // horizontal data scan
-  float scan = sin(uv.y * 40.0 - u_time * 1.2) * 0.5 + 0.5;
-  col += vec3(0.05, 0.12, 0.22) * scan * 0.04 * (0.5 + u_activity);
+  // scan
+  float scan = sin(uv.y * 90.0 - u_time * 1.4) * 0.5 + 0.5;
+  col += vec3(0.25, 0.12, 0.02) * scan * 0.05;
 
-  // activity shimmer band
-  float band = smoothstep(0.0, 0.02, abs(uv.y - (0.35 + 0.02 * sin(u_time * 0.4)))) ;
-  col += vec3(0.0, 0.35, 0.3) * (1.0 - band) * 0.03 * u_activity;
+  // vignette
+  float vig = smoothstep(1.1, 0.3, length(uv - 0.5));
+  col *= vig;
 
   gl_FragColor = vec4(col, 1.0);
 }
@@ -72,9 +63,7 @@ function compile(gl: WebGLRenderingContext, type: number, src: string) {
   gl.shaderSource(sh, src);
   gl.compileShader(sh);
   if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-    const err = gl.getShaderInfoLog(sh);
-    gl.deleteShader(sh);
-    throw new Error(err || "shader compile failed");
+    throw new Error(gl.getShaderInfoLog(sh) || "shader fail");
   }
   return sh;
 }
@@ -87,7 +76,6 @@ export function ShaderBackdrop({ activity = 0 }: { activity?: number }) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const gl = canvas.getContext("webgl", {
       alpha: false,
       antialias: false,
@@ -137,9 +125,8 @@ export function ShaderBackdrop({ activity = 0 }: { activity?: number }) {
 
     const frame = () => {
       if (!alive) return;
-      const t = (performance.now() - t0) / 1000;
       gl.uniform2f(uRes, canvas.width, canvas.height);
-      gl.uniform1f(uTime, t);
+      gl.uniform1f(uTime, (performance.now() - t0) / 1000);
       gl.uniform1f(uAct, Math.min(1, Math.max(0, activityRef.current)));
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       raf = requestAnimationFrame(frame);
@@ -150,10 +137,6 @@ export function ShaderBackdrop({ activity = 0 }: { activity?: number }) {
       alive = false;
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
-      gl.deleteProgram(prog);
-      gl.deleteShader(vs);
-      gl.deleteShader(fs);
-      gl.deleteBuffer(buf);
     };
   }, []);
 

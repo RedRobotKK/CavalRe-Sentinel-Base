@@ -1,15 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getLatest, getMeta, getJournalFiles } from "./api";
-import {
-  FunnelChart,
-  ClassPie,
-  EdgeHistogram,
-  TimelineChart,
-  ReasonBars,
-} from "./charts";
 import { Circuit } from "./Circuit";
 import { ShaderBackdrop } from "./gl/ShaderBackdrop";
 import { CircuitThree } from "./gl/CircuitThree";
+import { Scope } from "./Scope";
 
 type RecordRow = {
   seq?: number;
@@ -17,15 +11,8 @@ type RecordRow = {
   kind?: string;
   reason?: string;
   ref?: string;
-  amount?: string;
-  amount2?: string;
   context?: Record<string, string | boolean | null>;
 };
-
-function bpsPct(bps: number | null | undefined) {
-  if (bps == null) return "—";
-  return `${(bps / 100).toFixed(2)}%`;
-}
 
 export function App() {
   const [meta, setMeta] = useState<any>(null);
@@ -36,12 +23,15 @@ export function App() {
   const [clock, setClock] = useState(() => new Date().toISOString().slice(11, 19));
   const [prevCount, setPrevCount] = useState(0);
   const [pulseKey, setPulseKey] = useState(0);
+  const [scopeSamples, setScopeSamples] = useState<
+    { raw: number; accepted: number; rejected: number }[]
+  >([]);
 
   const refresh = useCallback(async () => {
     try {
       const [m, l, f] = await Promise.all([
         getMeta(),
-        getLatest(500),
+        getLatest(400),
         getJournalFiles(),
       ]);
       const n = l?.records?.length ?? 0;
@@ -51,6 +41,17 @@ export function App() {
       setLatest(l);
       setFiles(f.files ?? []);
       setErr(null);
+
+      // scope sample from latest heartbeats / summary
+      const recs: RecordRow[] = l?.records ?? [];
+      const hearts = recs.filter((r) => r.reason === "cycle_heartbeat").slice(-1)[0];
+      const raw = Number(hearts?.context?.raw ?? 0);
+      const accepted = Number(hearts?.context?.accepted ?? l?.summary?.accepts ?? 0);
+      const rejected = Number(hearts?.context?.rejected ?? l?.summary?.rejects ?? 0);
+      setScopeSamples((s) => {
+        const next = [...s, { raw, accepted, rejected }];
+        return next.slice(-80);
+      });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -61,7 +62,7 @@ export function App() {
     const id = setInterval(() => {
       setTick((t) => t + 1);
       refresh();
-    }, 3000);
+    }, 2500);
     return () => clearInterval(id);
   }, [refresh]);
 
@@ -75,12 +76,9 @@ export function App() {
   const summary = latest?.summary;
   const book = summary?.book;
   const records: RecordRow[] = latest?.records ?? [];
-  const newestFirst = useMemo(() => [...records].reverse(), [records]);
-  const wallet = meta?.wallet;
+  const newestFirst = useMemo(() => [...records].reverse().slice(0, 80), [records]);
   const go = meta?.goNoGo;
-
-  // 0..1 activity for shader (heartbeats + decisions)
-  const activity = Math.min(1, (summary?.n ?? 0) / 80);
+  const activity = Math.min(1, (summary?.n ?? 0) / 60);
 
   return (
     <div className="layout">
@@ -89,10 +87,10 @@ export function App() {
       <header className="topbar panel-rise">
         <div>
           <div className="brand">
-            CAVALRE <span>SENTINEL</span> DESK
+            SENTINEL <span>WYSE-26</span> // BASE
           </div>
           <div className="muted">
-            Phase {meta?.phase ?? "0.5"} · WebGL backdrop · Three.js circuit underlay
+            AMBER TERMINAL · CIRCUIT · SCOPE · LIVE POLL
           </div>
         </div>
         <div className="pills">
@@ -101,28 +99,65 @@ export function App() {
             {go?.verdict ?? "…"}
           </span>
           <span className="pill on live-blip">{meta?.network ?? "…"}</span>
-          <span className="pill">{meta?.orderType ?? "…"}</span>
-          <span className={`pill ${meta?.liveCapital ? "off" : "on"}`}>
-            live capital {meta?.liveCapital ? "ON" : "OFF"}
-          </span>
+          <span className="pill">{meta?.orderType ?? "Dutch_V3"}</span>
+          <span className="pill on">LIVE CAPITAL OFF</span>
           <button type="button" onClick={() => refresh()}>
-            refresh
+            poll
           </button>
         </div>
       </header>
 
-      {err && (
-        <div className="panel bad">
-          API error: {err}. Run <code>npm run desk:api</code> on :8787.
-        </div>
-      )}
+      <div className="main-col">
+        {err && (
+          <div className="panel bad">
+            LINK ERROR: {err} — start desk-api :8787
+          </div>
+        )}
 
-      <div className="circuit-shell panel-rise">
-        <CircuitThree pulseKey={pulseKey} />
-        <Circuit records={records} pulseKey={pulseKey} />
+        <div className="circuit-shell panel-rise">
+          <CircuitThree pulseKey={pulseKey} />
+          <Circuit records={records} pulseKey={pulseKey} />
+        </div>
+
+        <Scope samples={scopeSamples} />
+
+        <div className="feed-panel panel-rise">
+          <h2>
+            Live data feed · source journals/ · poll #{tick}
+            <span className="cursor-blink" />
+          </h2>
+          <div className="feed-scroll">
+            {newestFirst.length === 0 && (
+              <div className="feed-line info">
+                <span className="ts">--:--:--</span> waiting for heartbeat from
+                dry-run harness…
+              </div>
+            )}
+            {newestFirst.map((r, i) => {
+              const action =
+                (r.context?.policyAction as string) ??
+                (r.kind === "quote_accepted"
+                  ? "accept"
+                  : r.kind === "markout"
+                    ? "markout"
+                    : r.kind === "info"
+                      ? "info"
+                      : "reject");
+              return (
+                <div key={`${r.seq}-${i}`} className={`feed-line ${action}`}>
+                  <span className="ts">{r.ts?.slice(11, 19) ?? "--:--:--"}</span>{" "}
+                  [{action.padEnd(7)}] {(r.reason ?? "").slice(0, 48)}
+                  {r.context?.raw != null ? ` raw=${r.context.raw}` : ""}
+                  {r.context?.edgeBps != null ? ` edge=${r.context.edgeBps}` : ""}
+                  {r.ref ? ` ${String(r.ref).slice(0, 12)}` : ""}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
-      <section className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
+      <div className="side-col">
         <div className="panel panel-rise">
           <h2>Go / No-Go</h2>
           <div className="metric-row">
@@ -133,7 +168,7 @@ export function App() {
           </div>
           {(go?.gates ?? []).map((g: any) => (
             <div className="metric-row" key={g.id}>
-              <span title={g.detail}>{g.label}</span>
+              <span>{g.label}</span>
               <span
                 className={
                   g.status === "pass"
@@ -150,7 +185,32 @@ export function App() {
         </div>
 
         <div className="panel panel-rise">
-          <h2>Limits</h2>
+          <h2>Book</h2>
+          <div className="metric-row">
+            <span>records</span>
+            <span>{summary?.n ?? 0}</span>
+          </div>
+          <div className="metric-row">
+            <span>accept / reject / wait</span>
+            <span>
+              {summary?.accepts ?? 0}/{summary?.rejects ?? 0}/{summary?.waits ?? 0}
+            </span>
+          </div>
+          <div className="metric-row">
+            <span>markout n</span>
+            <span>{book?.markoutSample ?? 0}</span>
+          </div>
+          <div className="metric-row">
+            <span>W / L</span>
+            <span>
+              <span className="good">{book?.wins ?? 0}</span> /{" "}
+              <span className="bad">{book?.losses ?? 0}</span>
+            </span>
+          </div>
+        </div>
+
+        <div className="panel panel-rise">
+          <h2>Risk limits</h2>
           {meta?.risk &&
             Object.entries(meta.risk).map(([k, v]) => (
               <div className="metric-row" key={k}>
@@ -161,125 +221,34 @@ export function App() {
         </div>
 
         <div className="panel panel-rise">
-          <h2>Book quality</h2>
-          <div className="metric-row">
-            <span>accept rate</span>
-            <span>{bpsPct(book?.acceptRateBps)}</span>
-          </div>
-          <div className="metric-row">
-            <span>markout n</span>
-            <span>{book?.markoutSample ?? 0}</span>
-          </div>
-          <div className="metric-row">
-            <span>wins / losses</span>
-            <span>
-              <span className="good">{book?.wins ?? 0}</span> /{" "}
-              <span className="bad">{book?.losses ?? 0}</span>
-            </span>
-          </div>
-          <div className="metric-row">
-            <span>hit rate</span>
-            <span>{bpsPct(book?.hitRateBps)}</span>
-          </div>
-        </div>
-
-        <div className="panel panel-rise">
-          <h2>Wallet</h2>
-          <div className="metric-row">
-            <span>mode</span>
-            <span>{wallet?.mode ?? "dry-run"}</span>
-          </div>
-          <div className="metric-row">
-            <span>signing</span>
-            <span className="good">OFF</span>
-          </div>
-          <div className="metric-row">
-            <span>browser keys</span>
-            <span className="good">NEVER</span>
-          </div>
-        </div>
-      </section>
-
-      <section className="grid">
-        <div className="panel panel-rise">
-          <h2>Funnel</h2>
-          <FunnelChart records={records} />
-        </div>
-        <div className="panel panel-rise">
-          <h2>Timeline</h2>
-          <TimelineChart records={records} />
-        </div>
-        <div className="panel panel-rise">
-          <h2>Edge bps</h2>
-          <EdgeHistogram records={records} />
-        </div>
-        <div className="panel panel-rise">
-          <h2>Class mix</h2>
-          <ClassPie records={records} />
-        </div>
-      </section>
-
-      <section className="main">
-        <aside className="side panel-rise">
-          <h2>Reasons</h2>
-          <ReasonBars records={records} />
-          <h2 style={{ marginTop: 12 }}>Files</h2>
+          <h2>Journal files</h2>
           <ul className="clean">
-            {files.map((f) => (
+            {files.slice(0, 6).map((f) => (
               <li key={f.name}>
                 {f.name}
                 <div className="muted">{f.bytes} B</div>
               </li>
             ))}
+            {files.length === 0 && <li className="muted">none yet</li>}
           </ul>
-          <div className="muted" style={{ marginTop: 8 }}>
-            poll #{tick}
-          </div>
-        </aside>
-
-        <div className="table-wrap panel-rise">
-          <h2>Decision tape</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>ts</th>
-                <th>action</th>
-                <th>reason</th>
-                <th>class</th>
-                <th>edgeBps</th>
-                <th>tox</th>
-                <th>ref</th>
-              </tr>
-            </thead>
-            <tbody>
-              {newestFirst.map((r, i) => {
-                const action =
-                  (r.context?.policyAction as string) ??
-                  (r.kind === "quote_accepted"
-                    ? "accept"
-                    : r.kind === "info"
-                      ? "wait"
-                      : r.kind === "markout"
-                        ? "wait"
-                        : "reject");
-                return (
-                  <tr key={`${r.seq}-${i}`} className={i < 3 ? "flash" : undefined}>
-                    <td>{r.ts?.slice(11, 19) ?? ""}</td>
-                    <td>
-                      <span className={`tag ${action}`}>{action}</span>
-                    </td>
-                    <td title={r.reason}>{r.reason?.slice(0, 36)}</td>
-                    <td>{String(r.context?.orderClass ?? "")}</td>
-                    <td>{String(r.context?.edgeBps ?? "")}</td>
-                    <td>{String(r.context?.toxicity ?? "")}</td>
-                    <td title={r.ref}>{r.ref?.slice(0, 10)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
         </div>
-      </section>
+
+        <div className="panel panel-rise">
+          <h2>Link</h2>
+          <div className="metric-row">
+            <span>api</span>
+            <span className="good">:8787</span>
+          </div>
+          <div className="metric-row">
+            <span>chain</span>
+            <span>{meta?.chainId ?? 8453}</span>
+          </div>
+          <div className="metric-row">
+            <span>signing</span>
+            <span className="good">OFF</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
