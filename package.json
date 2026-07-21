@@ -14,6 +14,7 @@
     "test:watch": "npm run test:watch --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "dry-run": "tsx scripts/dry-run-harness.mjs",
+    "simulate": "tsx scripts/simulate-flow.mjs",
     "shadow-markout": "tsx scripts/shadow-markout.mjs",
     "go-no-go": "tsx scripts/go-no-go-report.mjs",
     "research-ops": "tsx scripts/research-ops.mjs",
