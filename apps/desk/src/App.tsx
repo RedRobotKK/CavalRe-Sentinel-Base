@@ -86,7 +86,11 @@ export function App() {
           <div className="brand">
             CAVALRE <span>SENTINEL</span> // BASE
           </div>
-          <div className="muted">RESEARCH TERMINAL · CIRCUIT · SCOPE · STREAM</div>
+          <div className="muted brand-sub">
+            <span className="powered">Powered by CavalRe</span>
+            <span className="sep">·</span>
+            RESEARCH TERMINAL · CIRCUIT · SCOPE · STREAM
+          </div>
         </div>
         <div className="pills">
           <span className="hud-clock">{clock}Z</span>

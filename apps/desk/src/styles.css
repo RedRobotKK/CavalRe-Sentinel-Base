@@ -130,6 +130,28 @@ button:hover {
   color: var(--amber-hot);
 }
 
+.brand-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.brand-sub .powered {
+  color: var(--phosphor);
+  text-shadow: 0 0 6px var(--glow);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.brand-sub .sep {
+  color: var(--border);
+}
+
 .pills {
   display: flex;
   flex-wrap: wrap;
@@ -381,7 +403,6 @@ button:hover {
   color: var(--warn);
 }
 
-/* Scope */
 .scope-panel {
   border: 1px solid var(--border);
   background: var(--panel);
@@ -423,7 +444,6 @@ button:hover {
   color: var(--muted);
 }
 
-/* Feed */
 .feed-panel {
   border: 1px solid var(--border);
   background: var(--panel);
