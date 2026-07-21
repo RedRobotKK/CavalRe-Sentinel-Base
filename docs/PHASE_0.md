@@ -1,15 +1,15 @@
 # Phase 0 — Bootstrap & Dry-Run Foundation (Base)
 
-**Goal**: Establish a green CI, core money primitives, RiskEngine, and a UniswapX order poller that runs in pure dry-run mode on Base. Zero capital at risk.
+**Goal**: Establish a green CI, core money primitives, RiskEngine, DecisionJournal, and a UniswapX order poller that runs in pure dry-run mode on Base. Zero capital at risk.
 
 ## Exit Criteria
 
 - [x] Repository bootstrapped with strict CI (typecheck + test + secret scan)
-- [x] `@cavalre/core` Amount primitive (bigint only) with tests
+- [x] `@cavalre/core` Amount primitive (bigint only) with tests + serialization helpers
 - [x] `@cavalre/risk-engine` with small-capital defaults and tests
-- [ ] DecisionJournal package (append-only, versioned records)
-- [ ] UniswapX Base order poller + Dutch order parser (dry-run only)
-- [ ] Composition root (`src/runner`) that defaults to dry-run
+- [x] `@cavalre/journal` DecisionJournal (append-only, Amount-safe, JSONL)
+- [x] `@cavalre/uniswapx-base` Dutch order parser + poller interface (dry-run)
+- [ ] Composition root (`src/runner`) that defaults to dry-run and wires poller → risk → journal
 - [ ] Markout / toxicity scaffolding in the journal
 - [ ] At least 7 days of continuous dry-run journal against live Base UniswapX open orders
 - [ ] All tests green in CI on every push
@@ -18,6 +18,12 @@
 
 $0 at risk. No private keys in the environment for live signing.
 
+## FloatLib / Amount Rule
+
+Every monetary value in the system is `Amount` (`bigint`).  
+Serialization uses decimal strings.  
+JavaScript `number` is never used for token amounts or notionals.
+
 ## Next
 
-Only after Phase 0 exit criteria are met do we move to Phase 1 (tiny live probes ≤ $200).
+Composition root that ties poller + RiskEngine + Journal together in pure dry-run mode.
