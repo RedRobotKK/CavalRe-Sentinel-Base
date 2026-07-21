@@ -60,7 +60,13 @@ function summarize(records) {
 
   for (const r of records) {
     byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
-    const action = r.context?.policyAction ?? (r.kind === "quote_accepted" ? "accept" : r.kind === "info" ? "wait" : "reject");
+    const action =
+      r.context?.policyAction ??
+      (r.kind === "quote_accepted"
+        ? "accept"
+        : r.kind === "info"
+          ? "wait"
+          : "reject");
     byAction[action] = (byAction[action] ?? 0) + 1;
     if (action === "accept") accepts += 1;
     else if (action === "wait") waits += 1;
@@ -128,6 +134,21 @@ async function handle(req, res) {
   const url = new URL(req.url ?? "/", `http://${HOST}:${PORT}`);
 
   try {
+    if (url.pathname === "/" || url.pathname === "") {
+      json(res, {
+        service: "sentinel-desk-api",
+        ui: "http://127.0.0.1:5173",
+        endpoints: [
+          "GET /health",
+          "GET /meta",
+          "GET /journals",
+          "GET /journals/latest?limit=300",
+          "GET /journals/:file/records",
+        ],
+      });
+      return;
+    }
+
     if (url.pathname === "/health") {
       json(res, { ok: true, service: "sentinel-desk-api" });
       return;
@@ -190,7 +211,7 @@ async function handle(req, res) {
       return;
     }
 
-    json(res, { error: "not_found" }, 404);
+    json(res, { error: "not_found", path: url.pathname }, 404);
   } catch (e) {
     json(res, { error: e instanceof Error ? e.message : String(e) }, 500);
   }
