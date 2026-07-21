@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Typecheck + Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck --workspaces --if-present
+
+      - name: Test
+        run: npm run test --workspaces --if-present
+
+      - name: Secret scan (basic)
+        run: |
+          ! grep -rn --include='*.ts' --include='*.js' --include='*.json' --include='*.md' \
+            -E '(BEGIN (EC|RSA|OPENSSH|PGP) PRIVATE KEY|ed25519:[1-9A-HJ-NP-Za-km-z]{80,}|PRIVATE KEY)' \
+            packages/ src/ .github/ || (echo '::error::possible secret material in tree' && exit 1)

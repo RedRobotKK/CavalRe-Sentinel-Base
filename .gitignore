@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build
+dist/
+build/
+*.tsbuildinfo
+
+# Test / Coverage
+coverage/
+.nyc_output/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Data & journals (regenerate — do not commit large artifacts)
+data/
+journals/
+*.jsonl
+
+# Misc
+.cache/
+tmp/
