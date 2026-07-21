@@ -4,7 +4,7 @@ import { Circuit } from "./Circuit";
 import { ShaderBackdrop } from "./gl/ShaderBackdrop";
 import { CircuitThree } from "./gl/CircuitThree";
 import { Scope, type ScopeSample } from "./Scope";
-import { LiveFeed } from "./LiveFeed";
+import { StreamBoard } from "./StreamBoard";
 
 type RecordRow = {
   seq?: number;
@@ -88,8 +88,6 @@ export function App() {
           </div>
           <div className="muted brand-sub">
             <span className="powered">Powered by CavalRe</span>
-            <span className="sep">·</span>
-            RESEARCH TERMINAL · CIRCUIT · SCOPE · STREAM
           </div>
         </div>
         <div className="pills">
@@ -100,6 +98,7 @@ export function App() {
           <span className="pill on live-blip">{meta?.network ?? "base"}</span>
           <span className="pill">{meta?.orderType ?? "Dutch_V3"}</span>
           <span className="pill on">LIVE CAPITAL OFF</span>
+          <span className="pill muted-pill">poll {tick}</span>
           <button type="button" onClick={() => refresh()}>
             poll
           </button>
@@ -119,7 +118,7 @@ export function App() {
         </div>
 
         <Scope samples={scopeSamples} />
-        <LiveFeed records={records} tick={tick} />
+        <StreamBoard records={records} />
       </div>
 
       <div className="side-col">

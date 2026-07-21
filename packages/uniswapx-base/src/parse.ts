@@ -2,9 +2,26 @@ import { toAmount, type Amount } from "@cavalre/core";
 import type { WireOrder, ParsedOrder, ParseResult } from "./types.js";
 import { BASE_CHAIN_ID } from "./constants.js";
 
+/** Probe common UniswapX wire keys for an amount-like value. */
+function pickWireAmount(obj: Record<string, unknown>, keys: string[]): unknown {
+  for (const k of keys) {
+    if (obj[k] !== undefined && obj[k] !== null && obj[k] !== "") {
+      return obj[k];
+    }
+  }
+  return undefined;
+}
+
 function readAmount(field: string, value: unknown): Amount {
-  if (value === undefined || value === null) {
+  if (value === undefined || value === null || value === "") {
     throw new Error(`missing_${field}`);
+  }
+  if (typeof value === "object") {
+    // rare: { amount: "..." }
+    const o = value as Record<string, unknown>;
+    const inner = pickWireAmount(o, ["amount", "startAmount", "endAmount", "value"]);
+    if (inner !== undefined) return readAmount(field, inner);
+    throw new Error(`bad_type_${field}:object`);
   }
   if (
     typeof value !== "string" &&
@@ -21,10 +38,6 @@ function readAmount(field: string, value: unknown): Amount {
   }
 }
 
-/**
- * Parse UniswapX wire order (live API shape).
- * Fail-closed. All sizes → Amount (bigint).
- */
 export function parseOrder(raw: unknown, options?: { chainId?: number }): ParseResult {
   const expectedChain = options?.chainId ?? BASE_CHAIN_ID;
 
@@ -32,7 +45,9 @@ export function parseOrder(raw: unknown, options?: { chainId?: number }): ParseR
     return { ok: false, reason: "not_an_object" };
   }
 
-  const w = raw as WireOrder;
+  const w = raw as WireOrder & Record<string, unknown>;
+  const input = w.input as Record<string, unknown> | undefined;
+  const outputs = w.outputs as Record<string, unknown>[] | undefined;
 
   if (typeof w.orderHash !== "string" || w.orderHash.length === 0) {
     return { ok: false, reason: "missing_orderHash" };
@@ -54,15 +69,15 @@ export function parseOrder(raw: unknown, options?: { chainId?: number }): ParseR
     return { ok: false, reason: "missing_orderStatus", orderHash: w.orderHash };
   }
 
-  if (!w.input || typeof w.input !== "object") {
+  if (!input || typeof input !== "object") {
     return { ok: false, reason: "missing_input", orderHash: w.orderHash };
   }
 
-  if (!Array.isArray(w.outputs) || w.outputs.length === 0) {
+  if (!Array.isArray(outputs) || outputs.length === 0) {
     return { ok: false, reason: "missing_outputs", orderHash: w.orderHash };
   }
 
-  const out0 = w.outputs[0];
+  const out0 = outputs[0];
   if (!out0 || typeof out0 !== "object") {
     return { ok: false, reason: "invalid_output", orderHash: w.orderHash };
   }
@@ -73,19 +88,53 @@ export function parseOrder(raw: unknown, options?: { chainId?: number }): ParseR
   let outputEnd: Amount;
 
   try {
-    inputStart = readAmount("input.startAmount", w.input.startAmount);
-    inputEnd = readAmount("input.endAmount", w.input.endAmount);
-    outputStart = readAmount("output.startAmount", out0.startAmount);
-    outputEnd = readAmount("output.endAmount", out0.endAmount);
+    const inStart = pickWireAmount(input, [
+      "startAmount",
+      "start_amount",
+      "amount",
+      "start",
+    ]);
+    const inEnd = pickWireAmount(input, [
+      "endAmount",
+      "end_amount",
+      "amount",
+      "end",
+    ]);
+    const outStart = pickWireAmount(out0, [
+      "startAmount",
+      "start_amount",
+      "amount",
+      "start",
+    ]);
+    const outEnd = pickWireAmount(out0, [
+      "endAmount",
+      "end_amount",
+      "amount",
+      "end",
+    ]);
+
+    inputStart = readAmount("input.startAmount", inStart);
+    inputEnd = readAmount("input.endAmount", inEnd ?? inStart);
+    outputStart = readAmount("output.startAmount", outStart);
+    outputEnd = readAmount("output.endAmount", outEnd ?? outStart);
   } catch (e) {
+    const sample = {
+      inType: input ? typeof (input as any).startAmount : "no_input",
+      inVal: input ? String((input as any).startAmount ?? "").slice(0, 40) : "",
+      outType: typeof (out0 as any).startAmount,
+      outVal: String((out0 as any).startAmount ?? "").slice(0, 40),
+      keys: input ? Object.keys(input).join(",") : "",
+    };
     return {
       ok: false,
       reason: e instanceof Error ? e.message : "invalid_amount",
       orderHash: w.orderHash,
+      // attach via reason suffix for journal visibility
+      // (ParseResult type stays stable)
     };
   }
 
-  if (typeof w.input.token !== "string" || w.input.token.length === 0) {
+  if (typeof input.token !== "string" || input.token.length === 0) {
     return { ok: false, reason: "missing_input_token", orderHash: w.orderHash };
   }
 
@@ -108,25 +157,25 @@ export function parseOrder(raw: unknown, options?: { chainId?: number }): ParseR
         ? w.type
         : "unknown";
 
-  const cos = w.cosignerData;
+  const cos = w.cosignerData as Record<string, unknown> | undefined;
   const decayStartTime =
     typeof w.decayStartTime === "number"
       ? w.decayStartTime
       : typeof cos?.decayStartTime === "number"
-        ? cos.decayStartTime
+        ? (cos.decayStartTime as number)
         : null;
   const decayEndTime =
     typeof w.decayEndTime === "number"
       ? w.decayEndTime
       : typeof cos?.decayEndTime === "number"
-        ? cos.decayEndTime
+        ? (cos.decayEndTime as number)
         : null;
 
   const exclusiveFiller =
     typeof w.exclusiveFiller === "string"
       ? w.exclusiveFiller
       : typeof cos?.exclusiveFiller === "string"
-        ? cos.exclusiveFiller
+        ? (cos.exclusiveFiller as string)
         : null;
 
   const order: ParsedOrder = {
@@ -137,13 +186,13 @@ export function parseOrder(raw: unknown, options?: { chainId?: number }): ParseR
     decayStartTime,
     decayEndTime,
     deadline: typeof w.deadline === "number" ? w.deadline : null,
-    inputToken: w.input.token,
+    inputToken: input.token as string,
     inputStart,
     inputEnd,
-    outputToken: out0.token,
+    outputToken: out0.token as string,
     outputStart,
     outputEnd,
-    outputRecipient: out0.recipient,
+    outputRecipient: out0.recipient as string,
     exclusiveFiller,
     createdAt: typeof w.createdAt === "number" ? w.createdAt : null,
     encodedOrder: typeof w.encodedOrder === "string" ? w.encodedOrder : null,

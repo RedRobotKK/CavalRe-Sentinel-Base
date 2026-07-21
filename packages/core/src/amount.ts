@@ -1,14 +1,9 @@
-/**
- * Amount primitive — FloatLib discipline off-chain.
- * bigint only for value; never JS number in arithmetic.
- */
+/** Amount = bigint. Never use Number for money arithmetic. */
 
 export type Amount = bigint;
 
 /**
- * Coerce wire values from UniswapX API / JSON into a digit string.
- * Live API sometimes emits amounts as JSON numbers (safe for small sizes)
- * or as decimal strings. Reject fractions and negatives.
+ * Coerce UniswapX / JSON wire values into a pure digit string.
  */
 export function coerceAmountInput(value: string | number | bigint): string {
   if (typeof value === "bigint") {
@@ -23,28 +18,46 @@ export function coerceAmountInput(value: string | number | bigint): string {
     if (!Number.isInteger(value)) {
       throw new Error(`Amount number must be integer: ${value}`);
     }
-    // Prefer exact digit form; avoid scientific notation from String(n)
     return BigInt(Math.trunc(value)).toString();
   }
 
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    throw new Error("Empty amount string");
+  let trimmed = value.trim();
+  if (trimmed.length === 0) throw new Error("Empty amount string");
+
+  // quoted nested
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    trimmed = trimmed.slice(1, -1).trim();
   }
-  // pure digits
+
   if (/^\d+$/.test(trimmed)) return trimmed;
-  // "123.0" / "123.000" from some serializers
   if (/^\d+\.0+$/.test(trimmed)) return trimmed.split(".")[0]!;
-  // hex 0x...
-  if (/^0x[0-9a-fA-F]+$/.test(trimmed)) {
-    return BigInt(trimmed).toString();
+  if (/^0x[0-9a-fA-F]+$/.test(trimmed)) return BigInt(trimmed).toString();
+
+  // scientific: 1.23e+18 or 1e18
+  const sci = trimmed.match(/^(\d+)(?:\.(\d+))?[eE]\+?(\d+)$/);
+  if (sci) {
+    const whole = sci[1]!;
+    const frac = sci[2] ?? "";
+    const exp = Number(sci[3]);
+    if (!Number.isFinite(exp) || exp > 78) {
+      throw new Error(`Invalid amount string: ${value}`);
+    }
+    const digits = whole + frac;
+    const zeros = exp - frac.length;
+    if (zeros >= 0) return digits + "0".repeat(zeros);
+    const cut = digits.length + zeros;
+    if (cut <= 0) return "0";
+    return digits.slice(0, cut);
   }
+
   throw new Error(`Invalid amount string: ${value}`);
 }
 
 export function toAmount(value: string | number | bigint): Amount {
-  const digits = coerceAmountInput(value);
-  return BigInt(digits);
+  return BigInt(coerceAmountInput(value));
 }
 
 export function add(a: Amount, b: Amount): Amount {
@@ -52,9 +65,7 @@ export function add(a: Amount, b: Amount): Amount {
 }
 
 export function sub(a: Amount, b: Amount): Amount {
-  if (b > a) {
-    throw new Error("Insufficient amount for subtraction");
-  }
+  if (b > a) throw new Error("Insufficient amount for subtraction");
   return a - b;
 }
 
