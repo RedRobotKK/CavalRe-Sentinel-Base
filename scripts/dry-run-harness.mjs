@@ -2,6 +2,7 @@
 /**
  * Base MAINNET dry-run harness (research book only).
  * Polls Dutch_V3 open orders (Uniswap filler docs for Base).
+ * Always writes a per-cycle heartbeat so journals/ is never empty while running.
  */
 
 import { mkdir, appendFile } from "node:fs/promises";
@@ -64,6 +65,24 @@ async function cycle() {
         referenceCostFn,
       }
     );
+
+    // Heartbeat so empty books still produce a journal artifact
+    journal.append({
+      kind: "info",
+      reason: "cycle_heartbeat",
+      context: {
+        dryRun: true,
+        stage: "poll",
+        orderType: ORDER_TYPE,
+        raw: String(result.rawCount),
+        accepted: String(result.accepted),
+        rejected: String(result.rejected),
+        waited: String(result.waited),
+        halted: result.halted,
+        cycle: String(cycles + 1),
+      },
+    });
+
     await flushNewRecords(before);
     cycles += 1;
     console.log(
