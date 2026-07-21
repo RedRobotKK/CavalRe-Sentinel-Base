@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 /**
- * Base MAINNET dry-run harness (research book only).
- * Polls Dutch_V3 open orders (Uniswap filler docs for Base).
- * Always writes a per-cycle heartbeat so journals/ is never empty while running.
+ * VIEW mode harness — Base MAINNET real sources, no signing.
+ *
+ * Sources:
+ *   - UniswapX open Dutch_V3 orders (HTTPS)
+ *   - Base RPC QuoterV2 eth_call (reference cost)
+ *
+ * Write mode requires wallet credentials + future live path (not here).
+ * Simulations: use `npm run simulate` separately; same decision path.
  */
 
 import { mkdir, appendFile } from "node:fs/promises";
@@ -13,6 +18,7 @@ import {
   createUniswapV3ReferenceCost,
   DEFAULT_BASE_RPC,
   BASE_DEFAULT_ORDER_TYPE,
+  UNISWAPX_ORDERS_URL,
 } from "@cavalre/uniswapx-base";
 import { runCycle } from "@cavalre/runner";
 
@@ -66,13 +72,14 @@ async function cycle() {
       }
     );
 
-    // Heartbeat so empty books still produce a journal artifact
     journal.append({
       kind: "info",
       reason: "cycle_heartbeat",
       context: {
         dryRun: true,
+        mode: "view",
         stage: "poll",
+        source: "uniswapx+base_rpc",
         orderType: ORDER_TYPE,
         raw: String(result.rawCount),
         accepted: String(result.accepted),
@@ -80,6 +87,7 @@ async function cycle() {
         waited: String(result.waited),
         halted: result.halted,
         cycle: String(cycles + 1),
+        requestUrl: result.requestUrl ?? null,
       },
     });
 
@@ -88,6 +96,7 @@ async function cycle() {
     console.log(
       JSON.stringify({
         ts: new Date().toISOString(),
+        mode: "view",
         network: "base-mainnet",
         chainId: 8453,
         orderType: ORDER_TYPE,
@@ -99,6 +108,7 @@ async function cycle() {
         halted: result.halted,
         journalSize: journal.size(),
         file: journalPath,
+        sources: { uniswapx: UNISWAPX_ORDERS_URL, rpc: RPC },
       })
     );
   } catch (err) {
@@ -106,6 +116,7 @@ async function cycle() {
       JSON.stringify({
         ts: new Date().toISOString(),
         level: "error",
+        mode: "view",
         message: err instanceof Error ? err.message : String(err),
       })
     );
@@ -131,15 +142,20 @@ console.error(
   JSON.stringify({
     ts: new Date().toISOString(),
     level: "info",
-    message: "base mainnet dry-run harness started",
+    message: "VIEW mode harness — real UniswapX + Base RPC, no signing",
+    mode: "view",
     network: "base-mainnet",
     chainId: 8453,
     orderType: ORDER_TYPE,
-    rpc: RPC,
+    sources: {
+      uniswapx: UNISWAPX_ORDERS_URL,
+      rpc: RPC,
+    },
     intervalSec: INTERVAL_SEC,
     pollLimit: POLL_LIMIT,
     journalPath,
     liveCapital: false,
+    write: false,
   })
 );
 

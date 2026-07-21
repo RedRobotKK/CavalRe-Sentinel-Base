@@ -2,6 +2,10 @@
 /**
  * Local journal API for Sentinel Desk.
  * Binds 127.0.0.1 only. Read-only. No keys.
+ *
+ * Mode model:
+ *   VIEW  = real UniswapX + Base RPC (via dry-run), no signing
+ *   WRITE = only when wallet env present AND live path enabled (not yet)
  */
 
 import { createServer } from "node:http";
@@ -11,6 +15,42 @@ import { join, basename } from "node:path";
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.DESK_API_PORT ?? 8787);
 const JOURNAL_DIR = process.env.JOURNAL_DIR ?? "journals";
+
+const UNISWAPX_ORDERS =
+  process.env.UNISWAPX_ORDERS_URL ?? "https://api.uniswap.org/v2/orders";
+const BASE_RPC =
+  process.env.BASE_RPC_URL ?? "https://mainnet.base.org";
+
+function operatingMode() {
+  const hasKey = Boolean(
+    process.env.SENTINEL_PRIVATE_KEY || process.env.FILLER_PRIVATE_KEY
+  );
+  const liveFlag =
+    process.env.SENTINEL_LIVE === "1" || process.env.SENTINEL_LIVE === "true";
+  // Write is not actually enabled in code yet — report intent only
+  if (hasKey && liveFlag) {
+    return {
+      mode: "write",
+      label: "WRITE",
+      liveCapital: false, // still false until runner allows live
+      note: "credentials present but runner live path not enabled",
+    };
+  }
+  if (hasKey) {
+    return {
+      mode: "view",
+      label: "VIEW",
+      liveCapital: false,
+      note: "wallet env present; still VIEW until SENTINEL_LIVE=1 + code path",
+    };
+  }
+  return {
+    mode: "view",
+    label: "VIEW",
+    liveCapital: false,
+    note: "real sources, no credentials, no broadcast",
+  };
+}
 
 async function listJournalFiles() {
   try {
@@ -149,11 +189,10 @@ function buildGoNoGo(all) {
   for (const r of all.records) {
     if (r.kind !== "markout" && r.markoutBps == null) continue;
     const w = r.markout?.windowSec ?? Number(r.context?.windowSec);
-    if (w !== 120 && Number.isFinite(w)) continue; // prefer +2m for gates display
+    if (w !== 120 && Number.isFinite(w)) continue;
     const bps = Number(r.markoutBps ?? r.markout?.markoutBps ?? r.context?.markoutBps);
     if (Number.isFinite(bps)) markouts.push(bps);
   }
-  // if no 120-only, use any markout
   if (markouts.length === 0) {
     for (const r of all.records) {
       const bps = Number(r.markoutBps ?? r.markout?.markoutBps ?? r.context?.markoutBps);
@@ -234,29 +273,39 @@ const RISK_DEFAULTS = {
   note: "USDC 6dp units for $1000 book in defaultSmallCapitalConfig",
 };
 
-const PRIMITIVES = [
-  { id: "Amount", layer: "core", desc: "bigint raw units; never JS number for value" },
-  { id: "RiskEngine", layer: "risk", desc: "hard position / daily loss / drawdown gates" },
-  { id: "DecisionJournal", layer: "journal", desc: "append-only JSONL; markout fields" },
-  { id: "DutchDecay", layer: "strategy", desc: "mirrors UniswapX DutchDecayLib" },
-  { id: "FillPolicy", layer: "strategy", desc: "accept | reject | wait" },
-  { id: "classifyOrder", layer: "strategy", desc: "dutch | priority | exclusive | unknown" },
-  { id: "computeEdgeBps", layer: "strategy", desc: "(refOut - resolvedOut) / refOut" },
-  { id: "QuoterV2 ref", layer: "mainnet", desc: "Base eth_call reference cost" },
-  { id: "UniswapX poll", layer: "mainnet", desc: "Dutch_V3 open orders Base" },
-  { id: "LocalSigner", layer: "wallet", desc: "Node-only; never in browser" },
-];
-
 function walletStatus() {
+  const op = operatingMode();
   const addr = process.env.SENTINEL_ADDRESS ?? null;
+  const hasKey = Boolean(
+    process.env.SENTINEL_PRIVATE_KEY || process.env.FILLER_PRIVATE_KEY
+  );
   return {
-    mode: "dry-run",
+    mode: op.mode,
+    label: op.label,
     liveSigning: false,
+    writeEnabled: false,
     browserKeys: false,
+    credentialsPresent: hasKey,
     addressConfigured: Boolean(addr),
     address: addr,
-    primitives: ["LocalSigner", "BIP-39/44", "ERC-20 encode", "destroy()"],
-    note: "Wallet connects via Node/env for live phase — not MetaMask in this desk.",
+    note: op.note,
+  };
+}
+
+function sourcesStatus() {
+  return {
+    uniswapx: {
+      url: UNISWAPX_ORDERS,
+      chainId: 8453,
+      orderType: "Dutch_V3",
+      role: "intent_poll",
+    },
+    baseRpc: {
+      url: BASE_RPC.replace(/\/+$/, ""),
+      role: "quoter_v2_eth_call",
+    },
+    journalDir: JOURNAL_DIR,
+    posture: "view",
   };
 }
 
@@ -282,10 +331,13 @@ async function handle(req, res) {
         service: "sentinel-desk-api",
         ui: "http://127.0.0.1:5173",
         phase: "0.5",
+        mode: operatingMode(),
+        sources: sourcesStatus(),
         endpoints: [
           "GET /health",
           "GET /meta",
           "GET /wallet",
+          "GET /sources",
           "GET /go-no-go",
           "GET /journals",
           "GET /journals/latest?limit=300",
@@ -295,7 +347,17 @@ async function handle(req, res) {
     }
 
     if (url.pathname === "/health") {
-      json(res, { ok: true, service: "sentinel-desk-api", phase: "0.5" });
+      json(res, {
+        ok: true,
+        service: "sentinel-desk-api",
+        phase: "0.5",
+        mode: operatingMode().label,
+      });
+      return;
+    }
+
+    if (url.pathname === "/sources") {
+      json(res, sourcesStatus());
       return;
     }
 
@@ -307,16 +369,18 @@ async function handle(req, res) {
 
     if (url.pathname === "/meta") {
       const all = await loadAllRecords();
+      const op = operatingMode();
       json(res, {
         network: "base-mainnet",
         chainId: 8453,
         orderType: "Dutch_V3",
         liveCapital: false,
-        posture: "dry-run",
+        posture: op.mode,
+        mode: op,
         phase: "0.5",
         risk: RISK_DEFAULTS,
         goNoGo: buildGoNoGo(all),
-        primitives: PRIMITIVES,
+        sources: sourcesStatus(),
         wallet: walletStatus(),
       });
       return;
@@ -392,6 +456,8 @@ createServer(handle).listen(PORT, HOST, () => {
       message: "desk-api listening",
       url: `http://${HOST}:${PORT}`,
       journalDir: JOURNAL_DIR,
+      mode: operatingMode().label,
+      sources: sourcesStatus(),
       phase: "0.5",
     })
   );
