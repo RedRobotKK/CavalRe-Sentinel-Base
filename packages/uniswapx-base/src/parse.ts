@@ -3,11 +3,12 @@ import type { WireOrder, ParsedOrder, ParseResult } from "./types.js";
 import { BASE_CHAIN_ID } from "./constants.js";
 
 /**
- * Parse and validate a single UniswapX wire order.
- * Fail-closed: any missing or invalid critical field → { ok: false }.
- * All monetary fields become Amount (bigint).
+ * Parse UniswapX wire order (live API shape).
+ * Fail-closed. All sizes → Amount (bigint).
  */
-export function parseOrder(raw: unknown): ParseResult {
+export function parseOrder(raw: unknown, options?: { chainId?: number }): ParseResult {
+  const expectedChain = options?.chainId ?? BASE_CHAIN_ID;
+
   if (raw === null || typeof raw !== "object") {
     return { ok: false, reason: "not_an_object" };
   }
@@ -22,7 +23,7 @@ export function parseOrder(raw: unknown): ParseResult {
     return { ok: false, reason: "missing_chainId", orderHash: w.orderHash };
   }
 
-  if (w.chainId !== BASE_CHAIN_ID) {
+  if (w.chainId !== expectedChain) {
     return {
       ok: false,
       reason: `wrong_chainId:${w.chainId}`,
@@ -42,7 +43,6 @@ export function parseOrder(raw: unknown): ParseResult {
     return { ok: false, reason: "missing_outputs", orderHash: w.orderHash };
   }
 
-  // For v1 we only take the first output leg (dominant case).
   const out0 = w.outputs[0];
   if (!out0 || typeof out0 !== "object") {
     return { ok: false, reason: "invalid_output", orderHash: w.orderHash };
@@ -82,14 +82,41 @@ export function parseOrder(raw: unknown): ParseResult {
     };
   }
 
+  const orderType =
+    typeof w.orderType === "string"
+      ? w.orderType
+      : typeof w.type === "string"
+        ? w.type
+        : "unknown";
+
+  const cos = w.cosignerData;
+  const decayStartTime =
+    typeof w.decayStartTime === "number"
+      ? w.decayStartTime
+      : typeof cos?.decayStartTime === "number"
+        ? cos.decayStartTime
+        : null;
+  const decayEndTime =
+    typeof w.decayEndTime === "number"
+      ? w.decayEndTime
+      : typeof cos?.decayEndTime === "number"
+        ? cos.decayEndTime
+        : null;
+
+  const exclusiveFiller =
+    typeof w.exclusiveFiller === "string"
+      ? w.exclusiveFiller
+      : typeof cos?.exclusiveFiller === "string"
+        ? cos.exclusiveFiller
+        : null;
+
   const order: ParsedOrder = {
     orderHash: w.orderHash,
     chainId: w.chainId,
     orderStatus: w.orderStatus,
-    orderType: typeof w.orderType === "string" ? w.orderType : "unknown",
-    decayStartTime:
-      typeof w.decayStartTime === "number" ? w.decayStartTime : null,
-    decayEndTime: typeof w.decayEndTime === "number" ? w.decayEndTime : null,
+    orderType,
+    decayStartTime,
+    decayEndTime,
     deadline: typeof w.deadline === "number" ? w.deadline : null,
     inputToken: w.input.token,
     inputStart,
@@ -98,19 +125,19 @@ export function parseOrder(raw: unknown): ParseResult {
     outputStart,
     outputEnd,
     outputRecipient: out0.recipient,
-    exclusiveFiller:
-      typeof w.exclusiveFiller === "string" ? w.exclusiveFiller : null,
+    exclusiveFiller,
     createdAt: typeof w.createdAt === "number" ? w.createdAt : null,
+    encodedOrder: typeof w.encodedOrder === "string" ? w.encodedOrder : null,
+    signature: typeof w.signature === "string" ? w.signature : null,
   };
 
   return { ok: true, order };
 }
 
-/**
- * Parse an array of wire orders. Returns only successfully parsed ones
- * plus a list of rejection reasons (for the journal).
- */
-export function parseOrders(rawList: unknown[]): {
+export function parseOrders(
+  rawList: unknown[],
+  options?: { chainId?: number }
+): {
   orders: ParsedOrder[];
   rejections: { orderHash?: string; reason: string }[];
 } {
@@ -118,7 +145,7 @@ export function parseOrders(rawList: unknown[]): {
   const rejections: { orderHash?: string; reason: string }[] = [];
 
   for (const raw of rawList) {
-    const result = parseOrder(raw);
+    const result = parseOrder(raw, options);
     if (result.ok) {
       orders.push(result.order);
     } else {
