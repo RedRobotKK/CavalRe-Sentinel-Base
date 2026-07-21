@@ -7,6 +7,7 @@ import type {
   DecisionKind,
   DecisionRecord,
   DecisionRecordWire,
+  MarkoutAnnotation,
 } from "./types.js";
 
 export interface AppendInput {
@@ -15,6 +16,7 @@ export interface AppendInput {
   ref?: string;
   amount?: Amount;
   amount2?: Amount;
+  markout?: MarkoutAnnotation;
   context?: Record<string, string | boolean | null>;
 }
 
@@ -42,6 +44,7 @@ export class DecisionJournal {
       ref: input.ref,
       amount: input.amount,
       amount2: input.amount2,
+      markout: input.markout,
       context: input.context,
     };
     this.records.push(record);
@@ -68,13 +71,17 @@ export class DecisionJournal {
     return this.records.map((r) => JSON.stringify(toWire(r))).join("\n");
   }
 
+  /** Append a single record as a JSONL line (for streaming writers). */
+  recordToJSONLLine(record: DecisionRecord): string {
+    return JSON.stringify(toWire(record));
+  }
+
   /** Parse a JSONL string back into records (does not clear existing). */
   loadJSONL(jsonl: string): void {
     const lines = jsonl.split("\n").map((l) => l.trim()).filter(Boolean);
     for (const line of lines) {
       const wire = JSON.parse(line) as DecisionRecordWire;
       const record = fromWire(wire);
-      // Preserve original seq if loading historical data; advance nextSeq accordingly.
       if (record.seq >= this.nextSeq) {
         this.nextSeq = record.seq + 1;
       }
@@ -93,6 +100,7 @@ function toWire(r: DecisionRecord): DecisionRecordWire {
     ref: r.ref,
     amount: r.amount !== undefined ? amountToString(r.amount) : undefined,
     amount2: r.amount2 !== undefined ? amountToString(r.amount2) : undefined,
+    markout: r.markout,
     context: r.context,
   };
 }
@@ -107,6 +115,7 @@ function fromWire(w: DecisionRecordWire): DecisionRecord {
     ref: w.ref,
     amount: w.amount !== undefined ? amountFromString(w.amount) : undefined,
     amount2: w.amount2 !== undefined ? amountFromString(w.amount2) : undefined,
+    markout: w.markout,
     context: w.context,
   };
 }

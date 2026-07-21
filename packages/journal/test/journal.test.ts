@@ -15,7 +15,7 @@ describe("DecisionJournal", () => {
   });
 
   it("appends a quote_rejected decision with Amount", () => {
-    const amount = toAmount("50000000"); // $50
+    const amount = toAmount("50000000");
     const record = journal.append({
       kind: "quote_rejected",
       reason: "exceeds_max_position_size",
@@ -50,7 +50,6 @@ describe("DecisionJournal", () => {
   });
 
   it("serializes Amounts as decimal strings (never number)", () => {
-    // Use string form so the test itself never introduces a Number literal.
     const raw = "9007199254740993";
     const big = toAmount(raw);
     journal.append({
@@ -62,12 +61,9 @@ describe("DecisionJournal", () => {
     const jsonl = journal.toJSONL();
     const parsed = JSON.parse(jsonl);
 
-    // Must be strings in the wire format
     expect(typeof parsed.amount).toBe("string");
     expect(parsed.amount).toBe(raw);
     expect(parsed.amount2).toBe("42");
-
-    // Number() loses precision on this value
     expect(String(Number(raw))).not.toBe(raw);
   });
 
@@ -116,7 +112,6 @@ describe("DecisionJournal", () => {
     journal.append({ kind: "info", reason: "a" });
     const snapshot = journal.all();
     journal.append({ kind: "info", reason: "b" });
-    // snapshot must not have grown
     expect(snapshot).toHaveLength(1);
     expect(journal.size()).toBe(2);
   });

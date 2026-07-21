@@ -13,6 +13,19 @@ export type DecisionKind =
   | "info";
 
 /**
+ * Optional markout / toxicity annotation.
+ * All monetary values remain Amount (bigint) at runtime.
+ */
+export interface MarkoutAnnotation {
+  /** Markout in basis points (can be negative). Stored as string on the wire. */
+  markoutBps: string;
+  /** Observation window in seconds. */
+  windowSec: number;
+  /** True if markout is considered toxic (policy-defined threshold). */
+  toxic: boolean;
+}
+
+/**
  * A single decision record.
  *
  * Rules:
@@ -34,8 +47,10 @@ export interface DecisionRecord {
   ref?: string;
   /** Optional notional or size (Amount) */
   amount?: Amount;
-  /** Optional secondary amount (e.g. markout delta, realized edge) */
+  /** Optional secondary amount (e.g. realized edge, markout absolute) */
   amount2?: Amount;
+  /** Markout / toxicity annotation when kind === "markout" or attached to fills */
+  markout?: MarkoutAnnotation;
   /** Free-form but JSON-serializable context. Must not contain raw numbers for money. */
   context?: Record<string, string | boolean | null>;
 }
@@ -53,5 +68,6 @@ export interface DecisionRecordWire {
   ref?: string;
   amount?: string;
   amount2?: string;
+  markout?: MarkoutAnnotation;
   context?: Record<string, string | boolean | null>;
 }
