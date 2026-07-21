@@ -2,7 +2,7 @@
 
 Two different meanings of "production":
 
-## A. Research production (current target) — ACHIEVED when
+## A. Research production (current target)
 
 - [x] Mainnet dry-run harness stable (Base, Dutch_V3)
 - [x] Edge computed (QuoterV2); decay before risk/policy
@@ -11,25 +11,29 @@ Two different meanings of "production":
 - [x] CI: secrets + audit high + typecheck + tests
 - [x] 0 high/critical npm audit (after remediation)
 - [x] Live mode hard-disabled
+- [x] Shadow markout job (`npm run shadow-markout`) for desk W/L
 - [ ] `package-lock.json` on `main` via SSH push (operator)
 - [ ] Multi-day journals accumulating
-- [ ] Shadow markout job labeling accepts
+- [ ] Shadow markout sample large enough for go/no-go stats
 
 ## B. Live-capital production — NOT started
 
 Blocked on [`GO_NO_GO.md`](GO_NO_GO.md).
 
-Requires: external signer path review, reactor execute integration tests, inventory checks, kill switch, phase-1 size caps.
-
-## Operator checklist (research prod)
+## Operator loop (research prod)
 
 ```bash
-npm ci   # or npm install if lock not yet on remote
-npm test && npm run typecheck && npm run audit:high
-export BASE_RPC_URL=...
-npm run dry-run          # terminal 1
-npm run desk:api         # terminal 2
-npm run desk:web         # terminal 3
+export BASE_RPC_URL=https://mainnet.base.org
+
+# terminal 1 — collect decisions
+npm run dry-run
+
+# terminal 2 / cron — label accepts when age ≥ window
+npm run shadow-markout -- --window 120
+
+# terminal 3–4 — visualize
+npm run desk:api
+npm run desk:web
 ```
 
 SSH for git write:
