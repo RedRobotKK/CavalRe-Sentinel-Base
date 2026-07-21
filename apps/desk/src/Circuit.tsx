@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { PipelineScene } from "./gl/PipelineScene";
 
 type StageId =
   | "poll"
@@ -131,7 +132,6 @@ function build(records: any[]) {
   }
 
   const log = [...signals].reverse().slice(0, 40);
-  const seen = accept + wait + reject;
 
   const funnel = STAGES.map((s) => ({
     ...s,
@@ -145,25 +145,13 @@ function build(records: any[]) {
     accept,
     wait,
     reject,
-    seen,
+    seen: accept + wait + reject,
     signalsThrough: accept + wait,
     funnel,
     log,
     lastHit,
     live: records.length > 0,
   };
-}
-
-function makeBinaryField(cols = 48, rows = 10) {
-  const field: string[][] = [];
-  for (let c = 0; c < cols; c++) {
-    const col: string[] = [];
-    for (let r = 0; r < rows; r++) {
-      col.push(Math.random() > 0.5 ? "1" : "0");
-    }
-    field.push(col);
-  }
-  return field;
 }
 
 export function Circuit({
@@ -176,7 +164,7 @@ export function Circuit({
   const m = useMemo(() => build(records), [records]);
   const logRef = useRef<HTMLDivElement>(null);
   const prevLen = useRef(0);
-  const [wave, setWave] = useState(0); // 0..lastHit only, one-shot
+  const [wave, setWave] = useState(0);
 
   useEffect(() => {
     if (!logRef.current) return;
@@ -184,7 +172,6 @@ export function Circuit({
     prevLen.current = m.log.length;
   }, [m.log.length, pulseKey]);
 
-  // One-shot wave from POLL → lastHit (no bounce back)
   useEffect(() => {
     const end = Math.max(0, PATH.indexOf(m.lastHit));
     let i = 0;
@@ -213,7 +200,7 @@ export function Circuit({
     );
   }
 
-  const hitIdx = Math.max(0, PATH.indexOf(m.lastHit));
+  const activeStage = Math.max(wave, PATH.indexOf(m.lastHit));
 
   return (
     <div className="pipe panel-rise">
@@ -252,33 +239,17 @@ export function Circuit({
         </span>
       </div>
 
-      <div className="chain-stage">
-        <div className="binary-field" aria-hidden>
-          {makeBinaryField().map((col, ci) => (
-            <div
-              key={ci}
-              className="binary-col"
-              style={{
-                animationDuration: `${6 + (ci % 5)}s`,
-                animationDelay: `${(ci % 7) * 0.35}s`,
-              }}
-            >
-              {col.map((bit, ri) => (
-                <span key={ri} className={bit === "1" ? "on" : ""}>
-                  {bit}
-                </span>
-              ))}
-            </div>
-          ))}
-        </div>
+      <div className="chain-stage chain-stage-3d">
+        <PipelineScene
+          pulseKey={pulseKey}
+          activeStage={activeStage}
+          intensity={Math.min(1, 0.4 + m.seen / 40)}
+        />
 
-        <div className="fly-track">
-          <div className="fly-thread" />
-
+        <div className="fly-track fly-track-overlay">
           {m.funnel.map((s, i) => {
             const on = i <= wave;
             const current = i === wave;
-            const terminal = i === hitIdx;
             return (
               <div
                 key={s.id}
@@ -286,10 +257,8 @@ export function Circuit({
                   "fly-block" +
                   (on ? " on" : "") +
                   (current ? " current" : "") +
-                  (terminal && wave >= hitIdx ? " terminal" : "") +
                   (s.drop > 0 ? " has-drop" : "")
                 }
-                style={{ animationDelay: `${i * 0.08}s` }}
               >
                 <div className="fly-block-core">
                   <div className="fly-label">{s.label}</div>
@@ -301,9 +270,6 @@ export function Circuit({
                     </span>
                   </div>
                 </div>
-                {i < m.funnel.length - 1 && (
-                  <div className={`fly-link${wave > i ? " hot" : ""}`} />
-                )}
               </div>
             );
           })}
