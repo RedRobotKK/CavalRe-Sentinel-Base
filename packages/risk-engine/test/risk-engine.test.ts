@@ -33,9 +33,18 @@ describe("RiskEngine (small capital)", () => {
   });
 
   it("rejects a position larger than current equity", () => {
-    // Force equity down
-    engine.recordLoss(toAmount("950000000")); // leave $50
-    const decision = engine.checkPositionSize(toAmount("60000000"));
+    // Reduce equity without hitting the daily-loss halt.
+    // maxDailyLoss = 20_000000, so we take a 15 loss → equity becomes 985.
+    engine.recordLoss(toAmount("15000000")); // $15
+    // Now request $80 (maxPositionSize) which is still < equity, so use a size > remaining equity.
+    // Better: create a fresh engine with tiny capital for this case.
+    const tiny = new RiskEngine({
+      workingCapital: toAmount("50000000"), // $50
+      maxPositionSize: toAmount("80000000"), // $80 (larger than equity)
+      maxDailyLoss: toAmount("100000000"),
+      drawdownLimit: toAmount("100000000"),
+    });
+    const decision = tiny.checkPositionSize(toAmount("60000000")); // $60 > $50 equity
     expect(decision.allowed).toBe(false);
     expect(decision.reason).toBe("exceeds_current_equity");
   });
