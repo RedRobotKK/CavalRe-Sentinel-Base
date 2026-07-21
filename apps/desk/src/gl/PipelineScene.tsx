@@ -1,20 +1,10 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 
-const STAGE_LABELS = [
-  "POLL",
-  "PARSE",
-  "CLASS",
-  "DECAY",
-  "EDGE",
-  "RISK",
-  "POLICY",
-  "BOOK",
-];
+const N = 8;
 
 /**
- * Spectacular Three.js underlay for the decision pipeline.
- * Nodes + beams + unidirectional packets. Lights up to activeStage.
+ * Hero pipeline visualization — full-bleed under stage labels.
  */
 export function PipelineScene({
   pulseKey = 0,
@@ -48,128 +38,139 @@ export function PipelineScene({
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x0a0602, 0.035);
+    scene.fog = new THREE.FogExp2(0x070402, 0.028);
 
-    const camera = new THREE.PerspectiveCamera(42, 2, 0.1, 100);
-    camera.position.set(0, 2.2, 14);
-    camera.lookAt(0, 0, 0);
+    const camera = new THREE.PerspectiveCamera(38, 2, 0.1, 80);
+    camera.position.set(0, 3.8, 11.5);
+    camera.lookAt(0, 0.2, 0);
 
-    // soft ambient + key
-    scene.add(new THREE.AmbientLight(0xff9a1a, 0.25));
-    const key = new THREE.PointLight(0xffb000, 1.4, 40);
-    key.position.set(0, 6, 8);
+    scene.add(new THREE.AmbientLight(0xff9a1a, 0.35));
+    const key = new THREE.PointLight(0xffc266, 2.2, 50);
+    key.position.set(0, 5, 6);
     scene.add(key);
+    const rim = new THREE.PointLight(0xff5533, 0.6, 30);
+    rim.position.set(-6, 2, -4);
+    scene.add(rim);
 
-    const N = STAGE_LABELS.length;
-    const spacing = 2.35;
-    const x0 = -((N - 1) * spacing) / 2;
+    // floor plane with grid
+    const floorMat = new THREE.MeshBasicMaterial({
+      color: 0x120a04,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+    });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 16), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -1.35;
+    scene.add(floor);
 
-    // ground grid (subtle chain lattice)
-    const grid = new THREE.GridHelper(28, 28, 0x5c3310, 0x3a2008);
-    grid.position.y = -1.6;
-    (grid.material as THREE.Material).transparent = true;
-    (grid.material as THREE.Material).opacity = 0.35;
+    const grid = new THREE.GridHelper(36, 36, 0x8a4a12, 0x3a2008);
+    grid.position.y = -1.34;
+    const gm = grid.material as THREE.Material | THREE.Material[];
+    if (Array.isArray(gm)) {
+      gm.forEach((m) => {
+        m.transparent = true;
+        m.opacity = 0.45;
+      });
+    } else {
+      gm.transparent = true;
+      gm.opacity = 0.45;
+    }
     scene.add(grid);
 
-    // stage nodes
-    const nodes: THREE.Mesh[] = [];
-    const glows: THREE.Mesh[] = [];
-    const nodeGroup = new THREE.Group();
+    const spacing = 2.5;
+    const x0 = -((N - 1) * spacing) / 2;
 
-    const boxGeo = new THREE.BoxGeometry(1.15, 0.85, 0.55);
-    const glowGeo = new THREE.SphereGeometry(0.55, 16, 16);
+    // main bus tube
+    const busCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(x0 - 0.8, 0, 0),
+      ...Array.from({ length: N }, (_, i) => new THREE.Vector3(x0 + i * spacing, 0, 0)),
+      new THREE.Vector3(x0 + (N - 1) * spacing + 0.8, 0, 0),
+    ]);
+    const busGeo = new THREE.TubeGeometry(busCurve, 64, 0.04, 8, false);
+    const busMat = new THREE.MeshBasicMaterial({
+      color: 0xff9f1a,
+      transparent: true,
+      opacity: 0.35,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    scene.add(new THREE.Mesh(busGeo, busMat));
+
+    // nodes
+    const nodes: THREE.Mesh[] = [];
+    const rings: THREE.Mesh[] = [];
+    const nodeGeo = new THREE.BoxGeometry(1.05, 0.72, 0.72);
+    const ringGeo = new THREE.TorusGeometry(0.72, 0.035, 8, 32);
 
     for (let i = 0; i < N; i++) {
       const mat = new THREE.MeshStandardMaterial({
-        color: 0x1a0e04,
+        color: 0x1c1006,
         emissive: 0xff8c1a,
-        emissiveIntensity: 0.15,
-        metalness: 0.7,
-        roughness: 0.35,
-        transparent: true,
-        opacity: 0.92,
+        emissiveIntensity: 0.2,
+        metalness: 0.85,
+        roughness: 0.28,
       });
-      const mesh = new THREE.Mesh(boxGeo, mat);
+      const mesh = new THREE.Mesh(nodeGeo, mat);
       mesh.position.set(x0 + i * spacing, 0, 0);
-      nodeGroup.add(mesh);
+      scene.add(mesh);
       nodes.push(mesh);
 
-      const gMat = new THREE.MeshBasicMaterial({
+      const rMat = new THREE.MeshBasicMaterial({
         color: 0xffb000,
         transparent: true,
-        opacity: 0.08,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const glow = new THREE.Mesh(glowGeo, gMat);
-      glow.position.copy(mesh.position);
-      glow.scale.setScalar(1.6);
-      nodeGroup.add(glow);
-      glows.push(glow);
-    }
-    scene.add(nodeGroup);
-
-    // beams between nodes
-    const beams: THREE.Line[] = [];
-    for (let i = 0; i < N - 1; i++) {
-      const geo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(x0 + i * spacing + 0.6, 0, 0),
-        new THREE.Vector3(x0 + (i + 1) * spacing - 0.6, 0, 0),
-      ]);
-      const mat = new THREE.LineBasicMaterial({
-        color: 0xff9f1a,
-        transparent: true,
-        opacity: 0.25,
+        opacity: 0.15,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       });
-      const line = new THREE.Line(geo, mat);
-      scene.add(line);
-      beams.push(line);
+      const ring = new THREE.Mesh(ringGeo, rMat);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.copy(mesh.position);
+      scene.add(ring);
+      rings.push(ring);
     }
 
-    // unidirectional packets along the bus
-    const PKT = 64;
+    // energy particles along bus (unidirectional)
+    const PKT = 100;
     const pktPos = new Float32Array(PKT * 3);
-    const pktPhase = new Float32Array(PKT);
-    const pktSpeed = new Float32Array(PKT);
+    const pktU = new Float32Array(PKT);
+    const pktSp = new Float32Array(PKT);
     for (let i = 0; i < PKT; i++) {
-      pktPhase[i] = Math.random();
-      pktSpeed[i] = 0.08 + Math.random() * 0.12;
+      pktU[i] = Math.random();
+      pktSp[i] = 0.06 + Math.random() * 0.1;
     }
     const pktGeo = new THREE.BufferGeometry();
     pktGeo.setAttribute("position", new THREE.BufferAttribute(pktPos, 3));
     const pktMat = new THREE.PointsMaterial({
       color: 0xffe0a0,
-      size: 0.12,
+      size: 0.14,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.9,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       sizeAttenuation: true,
     });
-    const packets = new THREE.Points(pktGeo, pktMat);
-    scene.add(packets);
+    scene.add(new THREE.Points(pktGeo, pktMat));
 
-    // ambient spark field
-    const SPARK = 120;
-    const sparkPos = new Float32Array(SPARK * 3);
-    for (let i = 0; i < SPARK; i++) {
-      sparkPos[i * 3] = (Math.random() - 0.5) * 22;
-      sparkPos[i * 3 + 1] = (Math.random() - 0.5) * 6;
-      sparkPos[i * 3 + 2] = (Math.random() - 0.5) * 8;
+    // secondary dust
+    const DUST = 180;
+    const dustPos = new Float32Array(DUST * 3);
+    for (let i = 0; i < DUST; i++) {
+      dustPos[i * 3] = (Math.random() - 0.5) * 24;
+      dustPos[i * 3 + 1] = Math.random() * 4 - 0.5;
+      dustPos[i * 3 + 2] = (Math.random() - 0.5) * 10;
     }
-    const sparkGeo = new THREE.BufferGeometry();
-    sparkGeo.setAttribute("position", new THREE.BufferAttribute(sparkPos, 3));
-    const sparkMat = new THREE.PointsMaterial({
+    const dustGeo = new THREE.BufferGeometry();
+    dustGeo.setAttribute("position", new THREE.BufferAttribute(dustPos, 3));
+    const dustMat = new THREE.PointsMaterial({
       color: 0xc47a22,
-      size: 0.04,
+      size: 0.035,
       transparent: true,
-      opacity: 0.4,
+      opacity: 0.35,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
-    scene.add(new THREE.Points(sparkGeo, sparkMat));
+    scene.add(new THREE.Points(dustGeo, dustMat));
 
     let raf = 0;
     let alive = true;
@@ -179,7 +180,7 @@ export function PipelineScene({
 
     const resize = () => {
       const w = mount.clientWidth || 900;
-      const h = mount.clientHeight || 180;
+      const h = mount.clientHeight || 220;
       renderer.setSize(w, h, false);
       camera.aspect = w / Math.max(h, 1);
       camera.updateProjectionMatrix();
@@ -190,82 +191,75 @@ export function PipelineScene({
     const frame = () => {
       if (!alive) return;
       const t = (performance.now() - t0) / 1000;
-      const active = Math.max(0, Math.min(N - 1, stageRef.current));
+      const active = Math.max(0, Math.min(N - 1, Math.floor(stageRef.current)));
       const inten = intensityRef.current;
 
       if (pulseRef.current !== lastPulse) {
         lastPulse = pulseRef.current;
         burst = 1;
       }
-      burst *= 0.94;
+      burst *= 0.93;
 
-      // gentle camera drift
-      camera.position.x = Math.sin(t * 0.12) * 0.35;
-      camera.position.y = 2.1 + Math.sin(t * 0.09) * 0.15;
-      camera.lookAt(0, 0, 0);
+      camera.position.x = Math.sin(t * 0.1) * 0.4;
+      camera.position.y = 3.7 + Math.sin(t * 0.08) * 0.12;
+      camera.lookAt(0, 0.15, 0);
 
-      // nodes react to active stage
       for (let i = 0; i < N; i++) {
         const mesh = nodes[i]!;
         const mat = mesh.material as THREE.MeshStandardMaterial;
-        const glow = glows[i]!;
-        const gMat = glow.material as THREE.MeshBasicMaterial;
+        const ring = rings[i]!;
+        const rMat = ring.material as THREE.MeshBasicMaterial;
 
         const isOn = i <= active;
-        const isCurrent = i === active;
+        const isCur = i === active;
 
-        mat.emissiveIntensity = isCurrent
-          ? 0.85 + burst * 0.6
+        mat.emissiveIntensity = isCur
+          ? 1.1 + burst * 0.8
           : isOn
-            ? 0.35 + burst * 0.2
+            ? 0.45
             : 0.12;
-        mat.color.setHex(isCurrent ? 0x3a1e08 : 0x1a0e04);
+        mat.color.setHex(isCur ? 0x4a2810 : 0x1c1006);
 
-        const bob = Math.sin(t * 1.4 + i * 0.5) * 0.04;
-        mesh.position.y = (isCurrent ? 0.25 : 0) + bob;
-        mesh.rotation.y = Math.sin(t * 0.5 + i) * 0.04;
+        const bob = Math.sin(t * 1.6 + i * 0.7) * 0.05;
+        mesh.position.y = (isCur ? 0.35 : isOn ? 0.1 : 0) + bob;
+        mesh.rotation.y = t * 0.15 + i * 0.2;
 
-        glow.position.copy(mesh.position);
-        gMat.opacity = isCurrent
-          ? 0.35 + burst * 0.35
-          : isOn
-            ? 0.12
-            : 0.04;
-        const sc = isCurrent ? 2.2 + burst * 0.5 : isOn ? 1.7 : 1.4;
-        glow.scale.setScalar(sc);
+        ring.position.copy(mesh.position);
+        ring.rotation.z = t * (isCur ? 1.2 : 0.3);
+        rMat.opacity = isCur ? 0.55 + burst * 0.35 : isOn ? 0.22 : 0.08;
+        const rs = isCur ? 1.15 + burst * 0.2 : 1;
+        ring.scale.setScalar(rs);
       }
 
-      // beams
-      for (let i = 0; i < beams.length; i++) {
-        const mat = beams[i]!.material as THREE.LineBasicMaterial;
-        mat.opacity = i < active ? 0.55 + burst * 0.25 : 0.15;
-      }
-
-      // packets only flow up to active stage (unidirectional)
+      // packets flow only to active
+      const maxU = Math.max(0.08, (active + 0.5) / N);
       const pos = pktGeo.attributes.position as THREE.BufferAttribute;
-      const pathLen = Math.max(0.15, active / Math.max(1, N - 1));
       for (let i = 0; i < PKT; i++) {
-        let u = (pktPhase[i]! + t * pktSpeed[i]!) % 1;
-        // map into [0, pathLen]
-        u = u * pathLen;
-        const x = x0 + u * (N - 1) * spacing;
-        const y = Math.sin(u * Math.PI * 4 + t * 2) * 0.08;
-        pos.setXYZ(i, x, y, (Math.random() - 0.5) * 0.05);
+        let u = (pktU[i]! + t * pktSp[i]!) % 1;
+        u = u * maxU;
+        const pt = busCurve.getPointAt(Math.min(0.999, u));
+        pos.setXYZ(
+          i,
+          pt.x,
+          pt.y + Math.sin(t * 4 + i) * 0.06,
+          pt.z + Math.cos(t * 3 + i) * 0.04
+        );
       }
       pos.needsUpdate = true;
-      pktMat.opacity = 0.5 + inten * 0.35 + burst * 0.3;
-      pktMat.size = 0.1 + burst * 0.08;
+      pktMat.opacity = 0.55 + inten * 0.3 + burst * 0.35;
+      pktMat.size = 0.12 + burst * 0.1;
 
-      // slow spark drift
-      const sp = sparkGeo.attributes.position as THREE.BufferAttribute;
-      for (let i = 0; i < SPARK; i++) {
-        let y = sp.getY(i) + 0.003 * ((i % 3) + 1);
-        if (y > 3) y = -3;
-        sp.setY(i, y);
+      busMat.opacity = 0.25 + (active / N) * 0.35 + burst * 0.2;
+
+      const dp = dustGeo.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < DUST; i++) {
+        let y = dp.getY(i) + 0.004;
+        if (y > 3.5) y = -0.8;
+        dp.setY(i, y);
       }
-      sp.needsUpdate = true;
+      dp.needsUpdate = true;
 
-      key.intensity = 1.1 + burst * 1.2 + inten * 0.4;
+      key.intensity = 1.8 + burst * 1.5 + inten * 0.5;
 
       renderer.render(scene, camera);
       raf = requestAnimationFrame(frame);
@@ -276,10 +270,11 @@ export function PipelineScene({
       alive = false;
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
-      boxGeo.dispose();
-      glowGeo.dispose();
+      nodeGeo.dispose();
+      ringGeo.dispose();
+      busGeo.dispose();
       pktGeo.dispose();
-      sparkGeo.dispose();
+      dustGeo.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) {
         mount.removeChild(renderer.domElement);

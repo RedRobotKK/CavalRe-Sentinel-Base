@@ -1,4 +1,4 @@
-/* 3D pipeline stage + HTML metric overlay */
+/* Hero 3D pipeline + metric chips below */
 
 .chain-stage {
   position: relative;
@@ -6,17 +6,15 @@
   margin-bottom: 14px;
   padding: 0;
   border: 1px solid rgba(92, 51, 16, 0.55);
-  background: radial-gradient(
-      ellipse 80% 70% at 50% 40%,
-      rgba(40, 20, 6, 0.35),
-      rgba(4, 2, 1, 0.9)
-    );
+  background: #060301;
   overflow: hidden;
-  min-height: 200px;
+  min-height: 260px;
 }
 
 .chain-stage-3d {
-  min-height: 220px;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
 }
 
 .pipeline-scene {
@@ -31,23 +29,23 @@
   display: block;
 }
 
-/* metric chips sit above the 3D scene */
+/* chips anchored to bottom of the 3d viewport */
 .fly-track-overlay {
   position: relative;
   z-index: 2;
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  gap: 4px;
-  padding: 12px 10px 14px;
-  min-height: 220px;
+  gap: 6px;
+  margin-top: auto;
+  padding: 0 12px 12px;
+  min-height: 280px;
   pointer-events: none;
 }
 
 .fly-block {
-  position: relative;
   flex: 1 1 0;
-  max-width: 100px;
+  max-width: 110px;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -55,49 +53,47 @@
 
 .fly-block-core {
   width: 100%;
-  margin: 0 2px;
-  padding: 8px 4px 6px;
+  padding: 7px 4px 6px;
   text-align: center;
-  border: 1px solid rgba(92, 51, 16, 0.75);
-  background: rgba(8, 5, 2, 0.72);
-  backdrop-filter: blur(6px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(92, 51, 16, 0.7);
+  background: rgba(6, 3, 1, 0.78);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
   transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s;
 }
 
 .fly-block.on .fly-block-core {
-  border-color: rgba(255, 160, 40, 0.5);
-  box-shadow: 0 0 14px rgba(255, 160, 40, 0.2);
+  border-color: rgba(255, 160, 40, 0.55);
+  box-shadow: 0 0 16px rgba(255, 160, 40, 0.22);
 }
 
 .fly-block.current .fly-block-core {
   border-color: #ffc266;
-  transform: translateY(-4px);
-  box-shadow: 0 0 22px rgba(255, 176, 0, 0.4);
-  background: rgba(24, 12, 4, 0.82);
+  transform: translateY(-3px);
+  box-shadow: 0 0 24px rgba(255, 176, 0, 0.4);
+  background: rgba(20, 10, 4, 0.88);
 }
 
 .fly-block.has-drop .fly-block-core {
-  border-bottom: 2px solid rgba(255, 80, 40, 0.65);
+  border-bottom: 2px solid rgba(255, 80, 40, 0.7);
 }
 
 .fly-label {
   font-size: 9px;
   letter-spacing: 0.12em;
   color: #8a5a1e;
-  margin-bottom: 2px;
 }
 .fly-block.on .fly-label,
 .fly-block.current .fly-label {
   color: #ffb000;
-  text-shadow: 0 0 8px rgba(255, 176, 0, 0.45);
+  text-shadow: 0 0 8px rgba(255, 176, 0, 0.4);
 }
 
 .fly-n {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: #ffb000;
-  text-shadow: 0 0 10px rgba(255, 176, 0, 0.35);
+  margin-top: 2px;
 }
 
 .fly-meta {
@@ -112,9 +108,14 @@
 .fly-meta .dim { opacity: 0.4; }
 
 @media (max-width: 900px) {
+  .chain-stage-3d,
+  .fly-track-overlay {
+    min-height: 200px;
+  }
   .fly-track-overlay {
     flex-wrap: wrap;
-    min-height: 160px;
   }
-  .fly-block { max-width: 30%; }
+  .fly-block {
+    max-width: 30%;
+  }
 }
