@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type StageId =
   | "poll"
@@ -73,6 +73,7 @@ function build(records: any[]) {
   let wait = 0;
   let reject = 0;
   const signals: Signal[] = [];
+  let lastHit: StageId = "poll";
 
   for (const r of records) {
     if (r.reason === "cycle_heartbeat") {
@@ -82,7 +83,6 @@ function build(records: any[]) {
       continue;
     }
 
-    // only order-level / decision rows on the rolling log
     if (
       r.kind !== "quote_accepted" &&
       r.kind !== "quote_rejected" &&
@@ -104,6 +104,7 @@ function build(records: any[]) {
     else reject += 1;
 
     const st = stageFrom(r);
+    lastHit = st;
     const idx = PATH.indexOf(st);
 
     if (action === "reject") {
@@ -136,9 +137,7 @@ function build(records: any[]) {
     });
   }
 
-  // newest first rolling window
   const log = [...signals].reverse().slice(0, 40);
-
   const seen = accept + wait + reject;
   const signalsThrough = accept + wait;
 
@@ -159,6 +158,7 @@ function build(records: any[]) {
     signalsThrough,
     funnel,
     log,
+    lastHit,
     live: records.length > 0,
   };
 }
@@ -173,15 +173,46 @@ export function Circuit({
   const m = useMemo(() => build(records), [records]);
   const logRef = useRef<HTMLDivElement>(null);
   const prevLen = useRef(0);
+  const [litIdx, setLitIdx] = useState(-1);
+  const [flowT, setFlowT] = useState(0);
 
-  // keep view pinned to newest when new signals arrive
   useEffect(() => {
     if (!logRef.current) return;
-    if (m.log.length >= prevLen.current) {
-      logRef.current.scrollTop = 0;
-    }
+    if (m.log.length >= prevLen.current) logRef.current.scrollTop = 0;
     prevLen.current = m.log.length;
   }, [m.log.length, pulseKey]);
+
+  // sequential light-up + traveling packet on every pulse / heartbeat cadence
+  useEffect(() => {
+    const end = Math.max(0, PATH.indexOf(m.lastHit));
+    let i = 0;
+    setLitIdx(0);
+    setFlowT(0);
+    const step = window.setInterval(() => {
+      i += 1;
+      if (i > end) {
+        window.clearInterval(step);
+        // hold then soft clear
+        window.setTimeout(() => setLitIdx(-1), 600);
+        return;
+      }
+      setLitIdx(i);
+      setFlowT(i / Math.max(1, PATH.length - 1));
+    }, 140);
+    return () => window.clearInterval(step);
+  }, [pulseKey, m.lastHit]);
+
+  // idle ambient crawl when quiet
+  useEffect(() => {
+    if (pulseKey > 0) return;
+    let t = 0;
+    const id = window.setInterval(() => {
+      t = (t + 1) % PATH.length;
+      setLitIdx(t);
+      setFlowT(t / Math.max(1, PATH.length - 1));
+    }, 900);
+    return () => window.clearInterval(id);
+  }, [pulseKey]);
 
   if (!m.live) {
     return (
@@ -194,6 +225,8 @@ export function Circuit({
       </div>
     );
   }
+
+  const n = STAGES.length;
 
   return (
     <div className="pipe panel-rise">
@@ -232,26 +265,88 @@ export function Circuit({
         </span>
       </div>
 
-      <div className="pipe-stages">
-        {m.funnel.map((s, i) => (
-          <div key={s.id} className="pipe-stage-wrap">
-            <div
-              className={`pipe-stage${s.pass > 0 ? " active" : ""}${s.drop > 0 ? " has-drop" : ""}`}
-            >
-              <div className="pipe-stage-name">{s.label}</div>
-              <div className="pipe-stage-n pass">{s.pass}</div>
-              <div className="pipe-stage-meta">
-                <span className="pass-lbl">pass</span>
-                {s.drop > 0 ? (
-                  <span className="drop-lbl">−{s.drop}</span>
-                ) : (
-                  <span className="drop-lbl muted">−0</span>
-                )}
+      {/* Flow rail: continuous line + points + traveler */}
+      <div className="flow-rail">
+        <svg className="flow-svg" viewBox={`0 0 ${n * 100} 48`} preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="flowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#5c3310" />
+              <stop offset="50%" stopColor="#ff9f1a" />
+              <stop offset="100%" stopColor="#5c3310" />
+            </linearGradient>
+            <filter id="glow">
+              <feGaussianBlur stdDeviation="2.2" result="b" />
+              <feMerge>
+                <feMergeNode in="b" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+
+          {/* base bus */}
+          <line
+            x1={50}
+            y1={24}
+            x2={(n - 1) * 100 + 50}
+            y2={24}
+            className="flow-bus"
+          />
+
+          {/* energized segment up to traveler */}
+          <line
+            x1={50}
+            y1={24}
+            x2={50 + flowT * ((n - 1) * 100)}
+            y2={24}
+            className="flow-bus-hot"
+            filter="url(#glow)"
+          />
+
+          {STAGES.map((s, i) => {
+            const x = i * 100 + 50;
+            const on = litIdx >= i;
+            const current = litIdx === i;
+            return (
+              <g key={s.id}>
+                <circle
+                  cx={x}
+                  cy={24}
+                  r={current ? 7 : on ? 5.5 : 4}
+                  className={`flow-node${on ? " on" : ""}${current ? " current" : ""}`}
+                  filter={on ? "url(#glow)" : undefined}
+                />
+              </g>
+            );
+          })}
+
+          {/* traveling packet */}
+          <circle
+            cx={50 + flowT * ((n - 1) * 100)}
+            cy={24}
+            r={4}
+            className="flow-packet"
+            filter="url(#glow)"
+          />
+        </svg>
+
+        <div className="flow-labels">
+          {m.funnel.map((s, i) => {
+            const on = litIdx >= i;
+            const current = litIdx === i;
+            return (
+              <div
+                key={s.id}
+                className={`flow-stage${on ? " on" : ""}${current ? " current" : ""}${s.drop > 0 ? " has-drop" : ""}`}
+              >
+                <div className="flow-stage-name">{s.label}</div>
+                <div className="flow-stage-n">{s.pass}</div>
+                <div className="flow-stage-drop">
+                  {s.drop > 0 ? `−${s.drop}` : ""}
+                </div>
               </div>
-            </div>
-            {i < m.funnel.length - 1 && <div className="pipe-arrow">→</div>}
-          </div>
-        ))}
+            );
+          })}
+        </div>
       </div>
 
       <div className="pipe-outcomes">
@@ -269,7 +364,6 @@ export function Circuit({
         </div>
       </div>
 
-      {/* Rolling realtime intent log */}
       <div className="intent-log">
         <div className="intent-log-head">
           <span>
