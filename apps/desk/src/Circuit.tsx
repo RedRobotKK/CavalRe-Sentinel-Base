@@ -31,9 +31,7 @@ type Signal = {
   reason: string;
   orderClass: string;
   edgeBps: string;
-  tox: string;
   stage: StageId;
-  seq?: number;
 };
 
 function stageFrom(r: any): StageId {
@@ -128,24 +126,17 @@ function build(records: any[]) {
         r.context?.edgeBps != null && r.context.edgeBps !== ""
           ? String(r.context.edgeBps)
           : "—",
-      tox:
-        r.context?.toxicity != null && r.context.toxicity !== ""
-          ? String(r.context.toxicity)
-          : "—",
       stage: st,
-      seq: r.seq,
     });
   }
 
   const log = [...signals].reverse().slice(0, 40);
   const seen = accept + wait + reject;
-  const signalsThrough = accept + wait;
 
   const funnel = STAGES.map((s) => ({
     ...s,
     pass: pass[s.id],
     drop: drop[s.id],
-    thru: pass[s.id] + drop[s.id],
   }));
 
   return {
@@ -155,12 +146,25 @@ function build(records: any[]) {
     wait,
     reject,
     seen,
-    signalsThrough,
+    signalsThrough: accept + wait,
     funnel,
     log,
     lastHit,
     live: records.length > 0,
   };
+}
+
+/** Precomputed binary columns for the chain field */
+function makeBinaryField(cols = 48, rows = 10) {
+  const field: string[][] = [];
+  for (let c = 0; c < cols; c++) {
+    const col: string[] = [];
+    for (let r = 0; r < rows; r++) {
+      col.push(Math.random() > 0.5 ? "1" : "0");
+    }
+    field.push(col);
+  }
+  return field;
 }
 
 export function Circuit({
@@ -173,8 +177,8 @@ export function Circuit({
   const m = useMemo(() => build(records), [records]);
   const logRef = useRef<HTMLDivElement>(null);
   const prevLen = useRef(0);
-  const [litIdx, setLitIdx] = useState(-1);
-  const [flowT, setFlowT] = useState(0);
+  const [litIdx, setLitIdx] = useState(0);
+  const binary = useMemo(() => makeBinaryField(), []);
 
   useEffect(() => {
     if (!logRef.current) return;
@@ -182,51 +186,32 @@ export function Circuit({
     prevLen.current = m.log.length;
   }, [m.log.length, pulseKey]);
 
-  // sequential light-up + traveling packet on every pulse / heartbeat cadence
+  // Signal travels stage-by-stage
   useEffect(() => {
     const end = Math.max(0, PATH.indexOf(m.lastHit));
     let i = 0;
     setLitIdx(0);
-    setFlowT(0);
     const step = window.setInterval(() => {
       i += 1;
-      if (i > end) {
-        window.clearInterval(step);
-        // hold then soft clear
-        window.setTimeout(() => setLitIdx(-1), 600);
-        return;
+      if (i > Math.max(end, PATH.length - 1)) {
+        i = 0;
       }
-      setLitIdx(i);
-      setFlowT(i / Math.max(1, PATH.length - 1));
-    }, 140);
+      setLitIdx(i > end && end > 0 ? Math.min(i, end) : i % PATH.length);
+    }, 280);
     return () => window.clearInterval(step);
   }, [pulseKey, m.lastHit]);
-
-  // idle ambient crawl when quiet
-  useEffect(() => {
-    if (pulseKey > 0) return;
-    let t = 0;
-    const id = window.setInterval(() => {
-      t = (t + 1) % PATH.length;
-      setLitIdx(t);
-      setFlowT(t / Math.max(1, PATH.length - 1));
-    }, 900);
-    return () => window.clearInterval(id);
-  }, [pulseKey]);
 
   if (!m.live) {
     return (
       <div className="pipe panel-rise">
         <div className="pipe-head">
           <h2>Pipeline</h2>
-          <span className="pipe-hint">open channel idle — start VIEW harness</span>
+          <span className="pipe-hint">open channel idle</span>
         </div>
-        <div className="pipe-empty">Listening… no journal signals yet.</div>
+        <div className="pipe-empty">Listening…</div>
       </div>
     );
   }
-
-  const n = STAGES.length;
 
   return (
     <div className="pipe panel-rise">
@@ -265,84 +250,63 @@ export function Circuit({
         </span>
       </div>
 
-      {/* Flow rail: continuous line + points + traveler */}
-      <div className="flow-rail">
-        <svg className="flow-svg" viewBox={`0 0 ${n * 100} 48`} preserveAspectRatio="none">
-          <defs>
-            <linearGradient id="flowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#5c3310" />
-              <stop offset="50%" stopColor="#ff9f1a" />
-              <stop offset="100%" stopColor="#5c3310" />
-            </linearGradient>
-            <filter id="glow">
-              <feGaussianBlur stdDeviation="2.2" result="b" />
-              <feMerge>
-                <feMergeNode in="b" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
+      {/* Flying blocks over binary chain */}
+      <div className="chain-stage">
+        <div className="binary-field" aria-hidden>
+          {binary.map((col, ci) => (
+            <div
+              key={ci}
+              className="binary-col"
+              style={{
+                animationDuration: `${6 + (ci % 5)}s`,
+                animationDelay: `${(ci % 7) * 0.35}s`,
+              }}
+            >
+              {col.map((bit, ri) => (
+                <span key={ri} className={bit === "1" ? "on" : ""}>
+                  {bit}
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
 
-          {/* base bus */}
-          <line
-            x1={50}
-            y1={24}
-            x2={(n - 1) * 100 + 50}
-            y2={24}
-            className="flow-bus"
+        <div className="fly-track">
+          <div className="fly-thread" />
+          <div
+            className="fly-packet"
+            style={{ left: `${(litIdx / Math.max(1, PATH.length - 1)) * 100}%` }}
           />
 
-          {/* energized segment up to traveler */}
-          <line
-            x1={50}
-            y1={24}
-            x2={50 + flowT * ((n - 1) * 100)}
-            y2={24}
-            className="flow-bus-hot"
-            filter="url(#glow)"
-          />
-
-          {STAGES.map((s, i) => {
-            const x = i * 100 + 50;
-            const on = litIdx >= i;
-            const current = litIdx === i;
-            return (
-              <g key={s.id}>
-                <circle
-                  cx={x}
-                  cy={24}
-                  r={current ? 7 : on ? 5.5 : 4}
-                  className={`flow-node${on ? " on" : ""}${current ? " current" : ""}`}
-                  filter={on ? "url(#glow)" : undefined}
-                />
-              </g>
-            );
-          })}
-
-          {/* traveling packet */}
-          <circle
-            cx={50 + flowT * ((n - 1) * 100)}
-            cy={24}
-            r={4}
-            className="flow-packet"
-            filter="url(#glow)"
-          />
-        </svg>
-
-        <div className="flow-labels">
           {m.funnel.map((s, i) => {
             const on = litIdx >= i;
             const current = litIdx === i;
+            const passed = litIdx > i;
             return (
               <div
                 key={s.id}
-                className={`flow-stage${on ? " on" : ""}${current ? " current" : ""}${s.drop > 0 ? " has-drop" : ""}`}
+                className={
+                  "fly-block" +
+                  (on ? " on" : "") +
+                  (current ? " current" : "") +
+                  (passed ? " passed" : "") +
+                  (s.drop > 0 ? " has-drop" : "")
+                }
+                style={{ animationDelay: `${i * 0.08}s` }}
               >
-                <div className="flow-stage-name">{s.label}</div>
-                <div className="flow-stage-n">{s.pass}</div>
-                <div className="flow-stage-drop">
-                  {s.drop > 0 ? `−${s.drop}` : ""}
+                <div className="fly-block-core">
+                  <div className="fly-label">{s.label}</div>
+                  <div className="fly-n">{s.pass}</div>
+                  <div className="fly-meta">
+                    <span>pass</span>
+                    <span className={s.drop > 0 ? "drop" : "dim"}>
+                      {s.drop > 0 ? `−${s.drop}` : "−0"}
+                    </span>
+                  </div>
                 </div>
+                {i < m.funnel.length - 1 && (
+                  <div className={`fly-link${litIdx > i ? " hot" : ""}`} />
+                )}
               </div>
             );
           })}
@@ -373,9 +337,7 @@ export function Circuit({
         </div>
         <div className="intent-log-body" ref={logRef}>
           {m.log.length === 0 && (
-            <div className="intent-log-empty">
-              channel open — waiting for order-level signals…
-            </div>
+            <div className="intent-log-empty">channel open — waiting…</div>
           )}
           {m.log.map((s, i) => (
             <div

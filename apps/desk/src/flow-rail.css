@@ -1,87 +1,230 @@
-/* Flow rail — imported conceptually; inlined in styles.css below via App if needed */
-.flow-rail {
+/* Flying circuit blocks over binary chain field */
+
+.chain-stage {
   position: relative;
   z-index: 1;
   margin-bottom: 14px;
-  padding: 8px 4px 4px;
+  padding: 18px 10px 14px;
+  border: 1px solid rgba(92, 51, 16, 0.55);
+  background: radial-gradient(
+      ellipse 80% 70% at 50% 40%,
+      rgba(40, 20, 6, 0.45),
+      rgba(4, 2, 1, 0.85)
+    );
+  overflow: hidden;
+  min-height: 148px;
 }
-.flow-svg {
-  width: 100%;
-  height: 48px;
-  display: block;
+
+/* Translucent 0/1 rain */
+.binary-field {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+  opacity: 0.22;
+  overflow: hidden;
+  mask-image: linear-gradient(
+    180deg,
+    transparent,
+    #000 15%,
+    #000 85%,
+    transparent
+  );
 }
-.flow-bus {
-  stroke: #3a2010;
-  stroke-width: 3;
-  stroke-linecap: round;
+.binary-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 9px;
+  line-height: 1.15;
+  color: #c47a22;
+  animation: binaryFall linear infinite;
+  font-family: var(--mono, monospace);
 }
-.flow-bus-hot {
-  stroke: #ff9f1a;
-  stroke-width: 3;
-  stroke-linecap: round;
+.binary-col span.on {
+  color: #ffb000;
   opacity: 0.9;
 }
-.flow-node {
-  fill: #1a0e04;
-  stroke: #5c3310;
-  stroke-width: 1.5;
-  transition: r 0.15s, fill 0.15s;
+@keyframes binaryFall {
+  0% { transform: translateY(-40%); opacity: 0.15; }
+  40% { opacity: 0.35; }
+  100% { transform: translateY(40%); opacity: 0.1; }
 }
-.flow-node.on {
-  fill: #ff9f1a;
-  stroke: #ffc266;
+
+.fly-track {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0;
+  flex-wrap: nowrap;
 }
-.flow-node.current {
-  fill: #ffe0a0;
-  stroke: #fff3d0;
+
+.fly-thread {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 140, 30, 0.25) 10%,
+    rgba(255, 140, 30, 0.35) 50%,
+    rgba(255, 140, 30, 0.25) 90%,
+    transparent
+  );
+  box-shadow: 0 0 12px rgba(255, 160, 40, 0.25);
+  pointer-events: none;
 }
-.flow-packet {
-  fill: #ffe0a0;
-  stroke: #ffb000;
-  stroke-width: 1;
+
+.fly-packet {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: #ffe0a0;
+  box-shadow:
+    0 0 10px #ffb000,
+    0 0 22px rgba(255, 160, 40, 0.7);
+  transition: left 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  z-index: 3;
+  pointer-events: none;
 }
-.flow-labels {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 4px;
-  margin-top: 2px;
+
+.fly-block {
+  position: relative;
+  flex: 1 1 0;
+  max-width: 104px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: blockFloat 4.5s ease-in-out infinite;
+  z-index: 2;
 }
-.flow-stage {
+@keyframes blockFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.fly-block-core {
+  width: 100%;
+  margin: 0 3px;
+  padding: 10px 6px 8px;
   text-align: center;
-  padding: 6px 2px;
-  border: 1px solid transparent;
-  border-radius: 2px;
-  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  border: 1px solid rgba(92, 51, 16, 0.85);
+  background: linear-gradient(
+    165deg,
+    rgba(36, 20, 8, 0.92),
+    rgba(10, 6, 2, 0.95)
+  );
+  box-shadow:
+    0 8px 20px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 176, 0, 0.08);
+  backdrop-filter: blur(4px);
+  transition:
+    border-color 0.25s,
+    box-shadow 0.25s,
+    transform 0.25s,
+    background 0.25s;
 }
-.flow-stage.on {
-  border-color: rgba(255, 160, 40, 0.35);
-  background: rgba(255, 160, 40, 0.06);
+
+.fly-block.on .fly-block-core {
+  border-color: rgba(255, 160, 40, 0.55);
+  box-shadow:
+    0 0 18px rgba(255, 160, 40, 0.25),
+    0 8px 20px rgba(0, 0, 0, 0.4),
+    inset 0 0 20px rgba(255, 160, 40, 0.06);
 }
-.flow-stage.current {
-  border-color: rgba(255, 200, 80, 0.7);
-  box-shadow: 0 0 14px rgba(255, 160, 40, 0.25);
-  background: rgba(255, 176, 0, 0.12);
+
+.fly-block.current .fly-block-core {
+  border-color: #ffc266;
+  transform: translateY(-6px) scale(1.06);
+  background: linear-gradient(
+    165deg,
+    rgba(60, 32, 10, 0.95),
+    rgba(20, 10, 4, 0.98)
+  );
+  box-shadow:
+    0 0 28px rgba(255, 176, 0, 0.45),
+    0 12px 28px rgba(0, 0, 0, 0.5),
+    inset 0 0 24px rgba(255, 176, 0, 0.12);
 }
-.flow-stage.has-drop {
-  border-bottom-color: rgba(255, 80, 40, 0.55);
+
+.fly-block.passed .fly-block-core {
+  border-color: rgba(255, 160, 40, 0.4);
 }
-.flow-stage-name {
+
+.fly-block.has-drop .fly-block-core {
+  border-bottom: 2px solid rgba(255, 80, 40, 0.65);
+}
+
+.fly-label {
   font-size: 9px;
-  letter-spacing: 0.1em;
-  color: var(--muted, #8a5a1e);
+  letter-spacing: 0.14em;
+  color: #8a5a1e;
+  margin-bottom: 4px;
 }
-.flow-stage.current .flow-stage-name,
-.flow-stage.on .flow-stage-name {
-  color: var(--phosphor, #ffb000);
+.fly-block.on .fly-label,
+.fly-block.current .fly-label {
+  color: #ffb000;
+  text-shadow: 0 0 8px rgba(255, 176, 0, 0.45);
 }
-.flow-stage-n {
-  font-size: 15px;
+
+.fly-n {
+  font-size: 18px;
   font-weight: 700;
-  color: var(--phosphor, #ffb000);
-  margin-top: 2px;
+  color: #ffb000;
+  text-shadow: 0 0 12px rgba(255, 176, 0, 0.35);
 }
-.flow-stage-drop {
+
+.fly-meta {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 4px;
   font-size: 9px;
-  color: var(--bad, #ff5533);
-  min-height: 12px;
+  color: #8a5a1e;
+}
+.fly-meta .drop {
+  color: #ff5533;
+}
+.fly-meta .dim {
+  opacity: 0.4;
+}
+
+.fly-link {
+  position: absolute;
+  right: -2px;
+  top: 50%;
+  width: 8px;
+  height: 2px;
+  background: rgba(92, 51, 16, 0.6);
+  z-index: 1;
+}
+.fly-link.hot {
+  background: #ff9f1a;
+  box-shadow: 0 0 8px rgba(255, 160, 40, 0.6);
+}
+
+@media (max-width: 900px) {
+  .fly-track {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .fly-thread,
+  .fly-packet,
+  .fly-link {
+    display: none;
+  }
+  .fly-block {
+    max-width: 30%;
+    animation: none;
+  }
 }
