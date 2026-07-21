@@ -13,6 +13,7 @@ export {
 export { parseOrder, parseOrders } from "./parse.js";
 export {
   pollOpenOrders,
+  BASE_DEFAULT_ORDER_TYPE,
   type PollResult,
   type PollerOptions,
   type FetchFn,

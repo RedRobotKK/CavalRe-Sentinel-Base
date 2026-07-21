@@ -1,24 +1,18 @@
 #!/usr/bin/env node
 /**
  * Base MAINNET dry-run harness (research book only).
- *
- * - Polls LIVE UniswapX open orders on Base (chainId 8453)
- * - Reference cost via Uniswap v3 QuoterV2 eth_call (BASE_RPC_URL)
- * - RiskEngine + FillPolicy + feature journal
- * - NO private keys, NO signing, NO broadcast
- * - Live capital remains disabled in runner
- *
- * Usage:
- *   export BASE_RPC_URL=https://mainnet.base.org   # or your provider
- *   npm run dry-run
- *   npm run dry-run -- --interval 15 --limit 30
+ * Polls Dutch_V3 open orders (Uniswap filler docs for Base).
  */
 
 import { mkdir, appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DecisionJournal } from "@cavalre/journal";
 import { RiskEngine, defaultSmallCapitalConfig } from "@cavalre/risk-engine";
-import { createUniswapV3ReferenceCost, DEFAULT_BASE_RPC } from "@cavalre/uniswapx-base";
+import {
+  createUniswapV3ReferenceCost,
+  DEFAULT_BASE_RPC,
+  BASE_DEFAULT_ORDER_TYPE,
+} from "@cavalre/uniswapx-base";
 import { runCycle } from "@cavalre/runner";
 
 const args = process.argv.slice(2);
@@ -29,8 +23,9 @@ function flag(name, fallback) {
 }
 
 const INTERVAL_SEC = Number(flag("interval", "20"));
-const POLL_LIMIT = Number(flag("limit", "25"));
+const POLL_LIMIT = Number(flag("limit", "50"));
 const JOURNAL_DIR = flag("dir", "journals");
+const ORDER_TYPE = flag("orderType", BASE_DEFAULT_ORDER_TYPE);
 const RPC = process.env.BASE_RPC_URL ?? DEFAULT_BASE_RPC;
 
 const risk = new RiskEngine(defaultSmallCapitalConfig());
@@ -65,6 +60,7 @@ async function cycle() {
       { risk, journal },
       {
         pollLimit: POLL_LIMIT,
+        orderType: ORDER_TYPE,
         referenceCostFn,
       }
     );
@@ -75,6 +71,7 @@ async function cycle() {
         ts: new Date().toISOString(),
         network: "base-mainnet",
         chainId: 8453,
+        orderType: ORDER_TYPE,
         cycle: cycles,
         raw: result.rawCount,
         accepted: result.accepted,
@@ -118,6 +115,7 @@ console.error(
     message: "base mainnet dry-run harness started",
     network: "base-mainnet",
     chainId: 8453,
+    orderType: ORDER_TYPE,
     rpc: RPC,
     intervalSec: INTERVAL_SEC,
     pollLimit: POLL_LIMIT,

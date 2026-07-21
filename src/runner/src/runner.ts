@@ -1,5 +1,5 @@
 import { amountToString } from "@cavalre/core";
-import { pollOpenOrders } from "@cavalre/uniswapx-base";
+import { pollOpenOrders, BASE_DEFAULT_ORDER_TYPE } from "@cavalre/uniswapx-base";
 import type { ParsedOrder } from "@cavalre/uniswapx-base";
 import {
   classifyOrder,
@@ -17,10 +17,6 @@ import type {
   RunnerMode,
 } from "./types.js";
 
-/**
- * Compliant dry-run cycle (JS/Cumberland bar):
- * classify → decay resolve → compute edge → toxicity → risk → policy → feature journal
- */
 export async function runCycle(
   deps: RunnerDeps,
   config: RunnerConfig = {}
@@ -36,6 +32,7 @@ export async function runCycle(
   const poll = await pollOpenOrders({
     fetchFn: config.fetchFn,
     limit: config.pollLimit ?? 20,
+    orderType: config.orderType ?? BASE_DEFAULT_ORDER_TYPE,
   });
 
   for (const r of poll.rejections) {
@@ -67,6 +64,7 @@ export async function runCycle(
       waited: 0,
       halted: true,
       acceptedOrders: [],
+      requestUrl: poll.requestUrl,
     };
   }
 
@@ -110,7 +108,6 @@ export async function runCycle(
       continue;
     }
 
-    // Reference cost: required for computed edge
     let refOutput = 0n;
     let edgeUndefined = true;
     let edgeBps = 0;
@@ -151,7 +148,6 @@ export async function runCycle(
       edgeBpsVsAmm: edgeBps,
     });
 
-    // Risk on RESOLVED input size (decay applied first)
     const riskDecision = deps.risk.checkPositionSize(resolved.input);
 
     const fillDecision = decideFill({
@@ -219,6 +215,7 @@ export async function runCycle(
     waited,
     halted: deps.risk.isHalted(),
     acceptedOrders,
+    requestUrl: poll.requestUrl,
   };
 }
 
