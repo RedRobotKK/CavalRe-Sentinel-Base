@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { getLatest, getMeta, getJournalFiles } from "./api";
+import {
+  FunnelChart,
+  ClassPie,
+  EdgeHistogram,
+  TimelineChart,
+  ReasonBars,
+} from "./charts";
 
 type RecordRow = {
   seq?: number;
@@ -23,7 +30,7 @@ export function App() {
     try {
       const [m, l, f] = await Promise.all([
         getMeta(),
-        getLatest(400),
+        getLatest(500),
         getJournalFiles(),
       ]);
       setMeta(m);
@@ -45,14 +52,17 @@ export function App() {
   }, [refresh]);
 
   const summary = latest?.summary;
-  const records: RecordRow[] = [...(latest?.records ?? [])].reverse();
+  const records: RecordRow[] = latest?.records ?? [];
+  const newestFirst = [...records].reverse();
 
   return (
     <div className="layout">
       <header className="topbar">
         <div>
           <div className="brand">CavalRe Sentinel Desk</div>
-          <div className="muted">Research book · journal-first · read-only</div>
+          <div className="muted">
+            Visual research book · every decision inspectable · live capital off
+          </div>
         </div>
         <div className="pills">
           <span className="pill on">{meta?.network ?? "…"}</span>
@@ -70,34 +80,41 @@ export function App() {
 
       {err && (
         <div className="panel bad">
-          API error: {err}. Start desk API (`npm run desk:api`) on :8787.
+          API error: {err}. Run <code>npm run desk:api</code> on :8787.
         </div>
       )}
 
       <section className="grid">
         <div className="panel">
-          <h2>Funnel (loaded journal tail)</h2>
+          <h2>Funnel</h2>
           <div className="metric-row">
             <span>records</span>
             <span className="big">{summary?.n ?? 0}</span>
           </div>
-          <div className="metric-row">
-            <span>accept</span>
-            <span className="good">{summary?.accepts ?? 0}</span>
-          </div>
-          <div className="metric-row">
-            <span>reject</span>
-            <span className="bad">{summary?.rejects ?? 0}</span>
-          </div>
-          <div className="metric-row">
-            <span>wait</span>
-            <span className="warn">{summary?.waits ?? 0}</span>
-          </div>
-          <div className="muted" style={{ marginTop: 8 }}>
-            file: {latest?.file?.name ?? "(none yet)"}
-          </div>
+          <FunnelChart records={records} />
         </div>
 
+        <div className="panel">
+          <h2>Cumulative decisions</h2>
+          <TimelineChart records={records} />
+        </div>
+
+        <div className="panel">
+          <h2>Edge distribution (bps)</h2>
+          <EdgeHistogram records={records} />
+        </div>
+
+        <div className="panel">
+          <h2>Order class mix</h2>
+          <ClassPie records={records} />
+        </div>
+      </section>
+
+      <section className="grid" style={{ gridTemplateColumns: "1.2fr 1fr 1fr" }}>
+        <div className="panel">
+          <h2>Top reject / wait reasons</h2>
+          <ReasonBars records={records} />
+        </div>
         <div className="panel">
           <h2>Risk defaults</h2>
           {meta?.risk &&
@@ -108,7 +125,6 @@ export function App() {
               </div>
             ))}
         </div>
-
         <div className="panel">
           <h2>Go / No-Go</h2>
           {(meta?.goNoGo?.gates ?? []).map((g: any) => (
@@ -128,27 +144,6 @@ export function App() {
             </div>
           ))}
         </div>
-
-        <div className="panel">
-          <h2>By class / reason</h2>
-          {summary?.byClass &&
-            Object.entries(summary.byClass).map(([k, v]) => (
-              <div className="metric-row" key={k}>
-                <span>class {k}</span>
-                <span>{String(v)}</span>
-              </div>
-            ))}
-          {summary?.byReason &&
-            Object.entries(summary.byReason)
-              .slice(0, 6)
-              .map(([k, v]) => (
-                <div className="metric-row" key={k}>
-                  <span title={k}>{k.slice(0, 28)}</span>
-                  <span>{String(v)}</span>
-                </div>
-              ))}
-          {!summary?.n && <div className="muted">Empty book — run dry-run harness</div>}
-        </div>
       </section>
 
       <section className="main">
@@ -165,7 +160,9 @@ export function App() {
             {files.map((f) => (
               <li key={f.name}>
                 {f.name}
-                <div className="muted">{f.bytes} B · {f.mtime}</div>
+                <div className="muted">
+                  {f.bytes} B · {f.mtime}
+                </div>
               </li>
             ))}
             {files.length === 0 && <li className="muted">No jsonl yet</li>}
@@ -176,7 +173,7 @@ export function App() {
         </aside>
 
         <div className="table-wrap">
-          <h2>Decisions (newest first)</h2>
+          <h2>Decisions (newest first) — full feature rows</h2>
           <table>
             <thead>
               <tr>
@@ -193,7 +190,7 @@ export function App() {
               </tr>
             </thead>
             <tbody>
-              {records.map((r, i) => {
+              {newestFirst.map((r, i) => {
                 const action =
                   (r.context?.policyAction as string) ??
                   (r.kind === "quote_accepted"
@@ -218,10 +215,10 @@ export function App() {
                   </tr>
                 );
               })}
-              {records.length === 0 && (
+              {newestFirst.length === 0 && (
                 <tr>
                   <td colSpan={10} className="muted">
-                    No decisions yet. Empty Base Dutch_V3 book is valid.
+                    Empty book — charts stay flat until dry-run writes decisions.
                   </td>
                 </tr>
               )}

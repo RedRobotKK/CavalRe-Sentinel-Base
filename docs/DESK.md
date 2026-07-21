@@ -1,41 +1,40 @@
-# Sentinel Desk — Research UI
+# Sentinel Desk — Visual Research Book (USP)
 
-Local, **read-only** interface for the Base UniswapX dry-run book.
+Local, **read-only** interface. The product differentiator is **seeing the book**: every policy decision, edge, toxicity score, and reason code — as charts and as a table.
 
-## Design principles (JS / Cumberland bar)
+## Why visualization is the USP
 
-1. **Journal is the book** — UI reads JSONL artifacts; it does not invent state.
-2. **Read-only** — no enable-live, no key entry, no execute buttons.
-3. **Dense, not decorative** — every pixel is a metric, reason code, or feature.
-4. **Primitives first** — Amounts as decimal strings, orderClass, edgeBps, toxicity, decay, policyAction.
-5. **Fail visible** — empty book and API errors shown plainly.
-6. **Local-only** — binds to 127.0.0.1; not a public product surface.
+Most filler stacks are black boxes. Sentinel Desk makes the research process legible:
+
+- **Funnel** — accept / wait / reject volume
+- **Timeline** — cumulative decisions (selectivity over time)
+- **Edge histogram** — distribution of computed edgeBps
+- **Class mix** — dutch vs priority vs exclusive vs unknown
+- **Reason bars** — why we said no (toxicity, risk, class, edge)
+- **Feature table** — full markout-ready rows from JSONL
+
+Empty charts with an empty Base book are honest, not broken.
+
+## Design rules
+
+1. Journal is the only source of truth
+2. Read-only — no live enable, no keys
+3. Dense quant aesthetic (dark, mono numbers)
+4. Local bind only (`127.0.0.1`)
 
 ## Run
 
-Terminal A — dry-run harness (produces journals):
-
 ```bash
+# terminal 1 — optional feed
 export BASE_RPC_URL=https://mainnet.base.org
 npm run dry-run
+
+# terminal 2
+npm run desk:api
+
+# terminal 3
+npm install   # once, for recharts
+npm run desk:web
 ```
 
-Terminal B — API + desk:
-
-```bash
-npm run desk
-```
-
-Open http://127.0.0.1:5173  
-API: http://127.0.0.1:8787
-
-## Panels
-
-| Panel | Source |
-|-------|--------|
-| Status strip | harness config constants + latest journal meta |
-| Funnel | counts by policyAction / kind |
-| Risk defaults | RiskEngine small-capital constants |
-| Go/No-Go | static checklist from GO_NO_GO.md thresholds |
-| Decisions table | tail of latest JSONL feature rows |
-| Journal files | list under journals/ |
+Open http://127.0.0.1:5173
