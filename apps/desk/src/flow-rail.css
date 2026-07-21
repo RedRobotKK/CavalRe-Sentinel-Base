@@ -1,18 +1,18 @@
-/* 3D labeled blocks — full real-estate, no HTML chip row */
-
+/* Full-bleed hero pipeline */
 .chain-stage {
   position: relative;
   z-index: 1;
   margin-bottom: 14px;
   padding: 0;
   border: 1px solid rgba(92, 51, 16, 0.55);
-  background: #060301;
+  background: #050201;
   overflow: hidden;
-  min-height: 260px;
+  min-height: 320px;
 }
 
 .chain-stage-3d {
-  min-height: 280px;
+  min-height: 340px;
+  height: clamp(300px, 38vh, 420px);
 }
 
 .pipeline-scene {
