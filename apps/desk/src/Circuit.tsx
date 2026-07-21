@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
-export type StageId =
+type StageId =
   | "poll"
   | "parse"
   | "classify"
@@ -8,465 +8,273 @@ export type StageId =
   | "edge"
   | "risk"
   | "policy"
-  | "journal";
+  | "book";
 
-const STAGES: { id: StageId; label: string; x: number }[] = [
-  { id: "poll", label: "POLL", x: 48 },
-  { id: "parse", label: "PARSE", x: 148 },
-  { id: "classify", label: "CLASS", x: 248 },
-  { id: "decay", label: "DECAY", x: 348 },
-  { id: "edge", label: "EDGE", x: 448 },
-  { id: "risk", label: "RISK", x: 548 },
-  { id: "policy", label: "POLICY", x: 648 },
-  { id: "journal", label: "BOOK", x: 748 },
+const STAGES: { id: StageId; label: string }[] = [
+  { id: "poll", label: "POLL" },
+  { id: "parse", label: "PARSE" },
+  { id: "classify", label: "CLASS" },
+  { id: "decay", label: "DECAY" },
+  { id: "edge", label: "EDGE" },
+  { id: "risk", label: "RISK" },
+  { id: "policy", label: "POLICY" },
+  { id: "book", label: "BOOK" },
 ];
 
-const PATH: StageId[] = STAGES.map((s) => s.id);
-
-type Packet = {
-  id: number;
-  t0: number;
-  duration: number;
-  kind: "heartbeat" | "decision";
+type IntentRow = {
+  ref: string;
+  action: "accept" | "reject" | "wait";
+  reason: string;
+  orderClass: string;
+  edgeBps: string;
+  tox: string;
+  ts: string;
+  stage: StageId;
 };
 
-type StageStat = {
-  thru: number;
-  drop: number;
-  lastReason: string;
-};
-
-type Snapshot = {
-  demo: boolean;
-  stages: Record<StageId, StageStat>;
-  accept: number;
-  wait: number;
-  reject: number;
-  seen: number;
-  heartbeats: number;
-  lastRaw: number;
-  lastEdge: string;
-  lastTox: string;
-  lastClass: string;
-  lastAction: string;
-  lastRef: string;
-  lastReason: string;
-  lastTs: string;
-};
-
-function stageFromRecord(r: any): StageId {
+function stageFrom(r: any): StageId {
   const stage = String(r?.context?.stage ?? "");
   if (stage === "parse") return "parse";
   if (stage === "classify") return "classify";
   if (stage === "resolve") return "decay";
   if (stage === "edge") return "edge";
-  if (stage === "policy" || stage === "risk") return "policy";
-  if (stage === "shadow_markout" || stage === "poll") return stage === "poll" ? "poll" : "journal";
+  if (stage === "policy") return "policy";
+  if (stage === "risk") return "risk";
   const reason = String(r?.reason ?? "");
-  if (reason === "invalid_amount_string" || reason.startsWith("input.") || reason.startsWith("output."))
-    return "parse";
   if (reason.startsWith("class_not_tradable")) return "classify";
-  if (reason.includes("decay")) return "decay";
   if (reason.includes("edge")) return "edge";
-  if (reason.startsWith("risk") || reason.includes("toxicity")) return "risk";
-  if (r?.kind === "quote_accepted" || r?.kind === "quote_rejected") return "policy";
-  if (r?.reason === "cycle_heartbeat") return "poll";
-  return "journal";
+  if (reason.includes("toxicity") || reason.startsWith("risk")) return "risk";
+  if (reason.includes("decay")) return "decay";
+  if (r?.kind === "quote_accepted") return "book";
+  return "parse";
 }
 
-function emptyStages(): Record<StageId, StageStat> {
-  return Object.fromEntries(
-    PATH.map((id) => [id, { thru: 0, drop: 0, lastReason: "" }])
-  ) as Record<StageId, StageStat>;
-}
-
-function computeSnapshot(records: any[]): Snapshot {
-  if (!records || records.length === 0) {
-    return DEMO_SNAPSHOT;
-  }
-
-  const stages = emptyStages();
+function build(records: any[]) {
+  const drops: Record<StageId, number> = {
+    poll: 0,
+    parse: 0,
+    classify: 0,
+    decay: 0,
+    edge: 0,
+    risk: 0,
+    policy: 0,
+    book: 0,
+  };
+  let heartbeats = 0;
+  let lastRaw = 0;
   let accept = 0;
   let wait = 0;
   let reject = 0;
-  let heartbeats = 0;
-  let lastRaw = 0;
-  let lastEdge = "—";
-  let lastTox = "—";
-  let lastClass = "—";
-  let lastAction = "—";
-  let lastRef = "";
-  let lastReason = "";
-  let lastTs = "";
+
+  // latest record per intent ref
+  const byRef = new Map<string, IntentRow>();
 
   for (const r of records) {
     if (r.reason === "cycle_heartbeat") {
       heartbeats += 1;
       lastRaw = Number(r.context?.raw ?? lastRaw);
-      stages.poll.thru += 1;
       continue;
     }
 
-    const st = stageFromRecord(r);
     const action =
-      (r.context?.policyAction as string) ??
+      (r.context?.policyAction as IntentRow["action"]) ??
       (r.kind === "quote_accepted"
         ? "accept"
         : r.kind === "info"
           ? "wait"
           : "reject");
 
-    lastTs = r.ts?.slice(11, 19) ?? lastTs;
-    lastReason = r.reason ?? lastReason;
-    lastRef = (r.ref as string) ?? lastRef;
-    lastAction = action;
-    if (r.context?.edgeBps != null) lastEdge = String(r.context.edgeBps);
-    if (r.context?.toxicity != null) lastTox = String(r.context.toxicity);
-    if (r.context?.orderClass != null) lastClass = String(r.context.orderClass);
+    if (action === "accept") accept += 1;
+    else if (action === "wait") wait += 1;
+    else reject += 1;
 
-    if (action === "accept") {
-      accept += 1;
-      for (const s of PATH) {
-        stages[s].thru += 1;
-      }
-      stages.journal.lastReason = r.reason ?? "accept";
-    } else if (action === "wait") {
-      wait += 1;
-      for (const s of PATH) {
-        stages[s].thru += 1;
-        if (s === "policy") break;
-      }
-      stages.policy.lastReason = r.reason ?? "wait";
-    } else {
-      reject += 1;
-      stages[st].drop += 1;
-      stages[st].lastReason = r.reason ?? "reject";
-      for (const s of PATH) {
-        stages[s].thru += 1;
-        if (s === st) break;
-      }
-    }
+    const st = stageFrom(r);
+    if (action === "reject") drops[st] += 1;
+
+    const ref = String(r.ref ?? "");
+    if (!ref) continue;
+
+    byRef.set(ref, {
+      ref: ref.slice(0, 14),
+      action,
+      reason: String(r.reason ?? "").slice(0, 48),
+      orderClass: String(r.context?.orderClass ?? "—"),
+      edgeBps:
+        r.context?.edgeBps != null && r.context.edgeBps !== ""
+          ? String(r.context.edgeBps)
+          : "—",
+      tox:
+        r.context?.toxicity != null && r.context.toxicity !== ""
+          ? String(r.context.toxicity)
+          : "—",
+      ts: r.ts?.slice(11, 19) ?? "—",
+      stage: st,
+    });
   }
 
-  stages.poll.thru = Math.max(stages.poll.thru, heartbeats, lastRaw);
+  const intents = [...byRef.values()].slice(-12).reverse();
+  const seen = accept + wait + reject;
+
+  // funnel: surviving estimate
+  const funnel = STAGES.map((s, i) => {
+    const droppedHere = drops[s.id];
+    let thru = seen;
+    for (let j = 0; j < i; j++) {
+      // rough: subtract prior drops from seen
+    }
+    // cumulative drop before this stage
+    let lost = 0;
+    for (let j = 0; j < i; j++) lost += drops[STAGES[j].id];
+    thru = Math.max(0, seen - lost);
+    return {
+      ...s,
+      thru: s.id === "poll" ? Math.max(seen, lastRaw, heartbeats) : thru,
+      drop: droppedHere,
+    };
+  });
 
   return {
-    demo: false,
-    stages,
+    heartbeats,
+    lastRaw,
     accept,
     wait,
     reject,
-    seen: accept + wait + reject,
-    heartbeats,
-    lastRaw,
-    lastEdge,
-    lastTox,
-    lastClass,
-    lastAction,
-    lastRef: lastRef ? lastRef.slice(0, 12) : "—",
-    lastReason: lastReason.slice(0, 40),
-    lastTs,
+    seen,
+    funnel,
+    intents,
+    live: records.length > 0,
   };
 }
 
-/** Labeled synthetic primitives so the block can be judged with density. */
-const DEMO_SNAPSHOT: Snapshot = {
-  demo: true,
-  stages: {
-    poll: { thru: 128, drop: 0, lastReason: "heartbeat" },
-    parse: { thru: 42, drop: 6, lastReason: "bad_type_amount" },
-    classify: { thru: 36, drop: 9, lastReason: "class_not_tradable:priority" },
-    decay: { thru: 27, drop: 2, lastReason: "decay_window_closed" },
-    edge: { thru: 25, drop: 8, lastReason: "edge_below_min" },
-    risk: { thru: 17, drop: 3, lastReason: "exceeds_max_position_size" },
-    policy: { thru: 14, drop: 4, lastReason: "toxicity_high" },
-    journal: { thru: 10, drop: 0, lastReason: "edge_ok" },
-  },
-  accept: 6,
-  wait: 4,
-  reject: 32,
-  seen: 42,
-  heartbeats: 128,
-  lastRaw: 3,
-  lastEdge: "12",
-  lastTox: "0.22",
-  lastClass: "dutch",
-  lastAction: "accept",
-  lastRef: "0xdemo00cafe",
-  lastReason: "edge_ok",
-  lastTs: "DEMO",
-};
-
 export function Circuit({
   records,
-  pulseKey,
+  pulseKey: _pulseKey,
 }: {
   records: any[];
   pulseKey: number;
 }) {
-  const [hot, setHot] = useState<Set<StageId>>(new Set());
-  const [packets, setPackets] = useState<Packet[]>([]);
-  const [now, setNow] = useState(() => Date.now());
+  const m = useMemo(() => build(records), [records]);
 
-  const snap = useMemo(() => computeSnapshot(records), [records]);
-  const maxThru = Math.max(1, ...PATH.map((id) => snap.stages[id].thru));
-
-  useEffect(() => {
-    let raf = 0;
-    let alive = true;
-    const tick = () => {
-      if (!alive) return;
-      setNow(Date.now());
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => {
-      alive = false;
-      cancelAnimationFrame(raf);
-    };
-  }, []);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setPackets((p) => [
-        ...p.slice(-6),
-        {
-          id: Date.now() + Math.random(),
-          t0: Date.now(),
-          duration: 2.6,
-          kind: "heartbeat",
-        },
-      ]);
-    }, 3400);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    if (records.length === 0) {
-      // animate a full path so DEMO density is visible
-      setHot(new Set(PATH));
-      setPackets((p) => [
-        ...p.slice(-4),
-        {
-          id: Date.now() + Math.random(),
-          t0: Date.now(),
-          duration: 1.4,
-          kind: "decision",
-        },
-      ]);
-      const t = setTimeout(() => setHot(new Set()), 1400);
-      return () => clearTimeout(t);
-    }
-    const last = records[records.length - 1];
-    const s = stageFromRecord(last);
-    const idx = PATH.indexOf(s);
-    setHot(new Set(PATH.slice(0, Math.max(idx, 0) + 1)));
-    setPackets((p) => [
-      ...p.slice(-6),
-      {
-        id: Date.now() + Math.random(),
-        t0: Date.now(),
-        duration: 1.1,
-        kind: "decision",
-      },
-    ]);
-    const clear = setTimeout(() => setHot(new Set()), 1200);
-    return () => clearTimeout(clear);
-  }, [pulseKey, records.length]);
-
-  const x0 = STAGES[0].x;
-  const x1 = STAGES[STAGES.length - 1].x;
+  if (!m.live) {
+    return (
+      <div className="pipe panel-rise">
+        <div className="pipe-head">
+          <h2>Pipeline</h2>
+          <span className="pipe-hint">waiting for VIEW journals or simulate…</span>
+        </div>
+        <div className="pipe-empty">
+          No intent decisions yet. Dry-run polls UniswapX; simulate injects synthetic Dutch flow.
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className={`circuit-panel dens${snap.demo ? " demo" : " live"}`}>
-      <div className="circuit-head">
-        <h2>
-          Pipeline{" "}
-          {snap.demo ? (
-            <span className="demo-tag">DEMO primitives — run npm run simulate</span>
-          ) : (
-            <span className="live-tag">live journal</span>
-          )}
-        </h2>
-        <div className="circuit-kpis">
-          <span className="kpi">
-            <em>IN</em> {snap.seen}
+    <div className="pipe panel-rise">
+      <div className="pipe-head">
+        <h2>Pipeline</h2>
+        <div className="pipe-kpis">
+          <span>
+            <em>intents</em> {m.seen}
           </span>
-          <span className="kpi">
-            <em>HB</em> {snap.heartbeats}
+          <span>
+            <em>raw</em> {m.lastRaw}
           </span>
-          <span className="kpi">
-            <em>RAW</em> {snap.lastRaw}
+          <span>
+            <em>hb</em> {m.heartbeats}
           </span>
-          <span className="kpi ok">
-            <em>A</em> {snap.accept}
+          <span className="ok">
+            <em>A</em> {m.accept}
           </span>
-          <span className="kpi wait">
-            <em>W</em> {snap.wait}
+          <span className="wait">
+            <em>W</em> {m.wait}
           </span>
-          <span className="kpi bad">
-            <em>R</em> {snap.reject}
-          </span>
-          <span className="circuit-live">
-            <span className="circuit-live-dot" />
-            {snap.demo ? "demo" : "live"}
+          <span className="bad">
+            <em>R</em> {m.reject}
           </span>
         </div>
       </div>
 
-      {/* last decision primitives strip */}
-      <div className="primitive-strip">
-        <span>
-          <em>ts</em> {snap.lastTs || "—"}
-        </span>
-        <span>
-          <em>action</em> {snap.lastAction}
-        </span>
-        <span>
-          <em>class</em> {snap.lastClass}
-        </span>
-        <span>
-          <em>edgeBps</em> {snap.lastEdge}
-        </span>
-        <span>
-          <em>tox</em> {snap.lastTox}
-        </span>
-        <span>
-          <em>reason</em> {snap.lastReason || "—"}
-        </span>
-        <span>
-          <em>ref</em> {snap.lastRef}
-        </span>
+      {/* Stage funnel — clean horizontal */}
+      <div className="pipe-stages">
+        {m.funnel.map((s, i) => (
+          <div key={s.id} className="pipe-stage-wrap">
+            <div
+              className={`pipe-stage${s.drop > 0 ? " has-drop" : ""}${s.thru > 0 ? " active" : ""}`}
+            >
+              <div className="pipe-stage-name">{s.label}</div>
+              <div className="pipe-stage-n">{s.thru}</div>
+              {s.drop > 0 ? (
+                <div className="pipe-stage-drop">−{s.drop}</div>
+              ) : (
+                <div className="pipe-stage-drop muted">—</div>
+              )}
+            </div>
+            {i < m.funnel.length - 1 && <div className="pipe-arrow">→</div>}
+          </div>
+        ))}
       </div>
 
-      <svg className="circuit-svg dens" viewBox="0 0 800 168" preserveAspectRatio="xMidYMid meet">
-        <defs>
-          <filter id="ng" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="1.6" result="b" />
-            <feMerge>
-              <feMergeNode in="b" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
+      {/* Outcomes */}
+      <div className="pipe-outcomes">
+        <div className="out ok">
+          <span>ACCEPT</span>
+          <strong>{m.accept}</strong>
+        </div>
+        <div className="out wait">
+          <span>WAIT</span>
+          <strong>{m.wait}</strong>
+        </div>
+        <div className="out bad">
+          <span>REJECT</span>
+          <strong>{m.reject}</strong>
+        </div>
+      </div>
 
-        <line className="circuit-bus" x1={x0 + 28} y1={48} x2={x1 - 28} y2={48} />
-
-        {STAGES.slice(0, -1).map((s, i) => {
-          const b = STAGES[i + 1];
-          const active = hot.has(s.id) && hot.has(b.id);
-          return (
-            <line
-              key={`w-${s.id}`}
-              className={`circuit-wire${active ? " active" : ""}`}
-              x1={s.x + 28}
-              y1={48}
-              x2={b.x - 28}
-              y2={48}
-            />
-          );
-        })}
-
-        {STAGES.map((s) => {
-          const d = snap.stages[s.id].drop;
-          if (d <= 0) return null;
-          return (
-            <g key={`drop-${s.id}`} className="drop-branch">
-              <line x1={s.x} y1={62} x2={s.x} y2={88} />
-              <line x1={s.x} y1={88} x2={s.x + 20} y2={88} />
-              <circle cx={s.x + 20} cy={88} r={2} />
-              <text x={s.x + 26} y={91}>
-                −{d}
-              </text>
-            </g>
-          );
-        })}
-
-        {packets.map((p) => {
-          const elapsed = (now - p.t0) / 1000;
-          const t = elapsed / p.duration;
-          if (t < 0 || t > 1) return null;
-          const x = x0 + (x1 - x0) * t;
-          const isDecision = p.kind === "decision";
-          return (
-            <g key={p.id} filter={isDecision ? "url(#ng)" : undefined}>
-              <circle
-                className={isDecision ? "circuit-particle hot" : "circuit-particle"}
-                cx={x}
-                cy={48}
-                r={isDecision ? 3 : 2}
-              />
-            </g>
-          );
-        })}
-
-        {STAGES.map((s) => {
-          const isHot = hot.has(s.id);
-          const st = snap.stages[s.id];
-          const intensity = st.thru / maxThru;
-          return (
-            <g
-              key={s.id}
-              className={`circuit-node dens${isHot ? " hot" : ""}${st.drop > 0 ? " has-drop" : ""}`}
-              transform={`translate(${s.x}, 48)`}
-            >
-              <rect
-                className="thru-bar"
-                x={-28}
-                y={14}
-                width={56 * Math.max(0.06, intensity)}
-                height={2.5}
-              />
-              <rect x={-28} y={-13} width={56} height={26} rx={1} />
-              <text className="node-label" y={2}>
-                {s.label}
-              </text>
-              <text className="node-metric" y={32}>
-                {st.thru}
-                {st.drop > 0 ? <tspan className="drop-tspan"> −{st.drop}</tspan> : null}
-              </text>
-              {st.lastReason ? (
-                <text className="node-reason" y={44}>
-                  {st.lastReason.slice(0, 14)}
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
-
-        <g className="outcome-strip">
-          <OutcomeChip x={120} label="ACCEPT" n={snap.accept} tone="ok" />
-          <OutcomeChip x={220} label="WAIT" n={snap.wait} tone="wait" />
-          <OutcomeChip x={320} label="REJECT" n={snap.reject} tone="bad" />
-          <text x={748} y={148} textAnchor="end" className="out-label">
-            {snap.demo ? "DEMO · not live capital" : "dry-run · capital OFF"}
-          </text>
-        </g>
-      </svg>
+      {/* Unique intents table */}
+      <div className="pipe-table-wrap">
+        <div className="pipe-table-head">
+          <span>Intents</span>
+          <span className="muted">{m.intents.length} unique refs</span>
+        </div>
+        <table className="pipe-table">
+          <thead>
+            <tr>
+              <th>ts</th>
+              <th>ref</th>
+              <th>class</th>
+              <th>stage</th>
+              <th>action</th>
+              <th>edge</th>
+              <th>reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {m.intents.map((it) => (
+              <tr key={it.ref + it.ts} className={it.action}>
+                <td>{it.ts}</td>
+                <td className="mono">{it.ref}</td>
+                <td>{it.orderClass}</td>
+                <td>{it.stage}</td>
+                <td>
+                  <span className={`tag ${it.action}`}>{it.action}</span>
+                </td>
+                <td>{it.edgeBps}</td>
+                <td className="reason" title={it.reason}>
+                  {it.reason}
+                </td>
+              </tr>
+            ))}
+            {m.intents.length === 0 && (
+              <tr>
+                <td colSpan={7} className="muted">
+                  heartbeats only — no order-level decisions yet
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
-  );
-}
-
-function OutcomeChip({
-  x,
-  label,
-  n,
-  tone,
-}: {
-  x: number;
-  label: string;
-  n: number;
-  tone: string;
-}) {
-  return (
-    <g transform={`translate(${x}, 138)`} className={`out-chip ${tone}`}>
-      <rect x={0} y={0} width={88} height={18} rx={1} />
-      <text x={6} y={13}>
-        {label}
-      </text>
-      <text x={82} y={13} textAnchor="end" className="out-n">
-        {n}
-      </text>
-    </g>
   );
 }
