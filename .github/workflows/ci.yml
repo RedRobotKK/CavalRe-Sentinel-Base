@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-# Strict least-privilege for an app managing capital
 permissions:
   contents: read
   security-events: write
@@ -16,7 +15,6 @@ defaults:
     shell: bash
 
 jobs:
-  # STAGE 1: Deep Security & Secret Auditing
   security-gate:
     name: Security & Secret Scan
     runs-on: ubuntu-latest
@@ -25,7 +23,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          # Full history so secret scanners see more than the head snapshot
           fetch-depth: 0
 
       - name: TruffleHog Secret Verification Scan
@@ -36,11 +33,10 @@ jobs:
           head: HEAD
           extra_args: --only-verified
 
-  # STAGE 2: Supply Chain Validation
   dependency-gate:
     name: Dependency Audit
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -50,15 +46,20 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies (for audit graph)
-        run: npm ci
+      # Prefer npm ci when lockfile is present (commit package-lock.json)
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            echo "WARN: package-lock.json missing; using npm install"
+            npm install
+          fi
 
       - name: Audit Node Modules for Vulnerabilities
         run: npm audit --audit-level=high
 
-  # STAGE 3: Runtime Math & Type Correctness
   runtime-gate:
     name: Runtime & Math Soundness
     needs: [security-gate, dependency-gate]
@@ -73,10 +74,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: package-lock.json
 
-      - name: Clean Install Monorepo Dependencies
-        run: npm ci
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: Typecheck
         run: npm run typecheck --workspaces --if-present

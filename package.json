@@ -16,10 +16,18 @@
     "dry-run": "tsx scripts/dry-run-harness.mjs",
     "desk:api": "node scripts/desk-api.mjs",
     "desk:web": "npm run dev -w @cavalre/desk",
-    "desk": "node scripts/desk-api.mjs & npm run dev -w @cavalre/desk"
+    "desk": "node scripts/desk-api.mjs & npm run dev -w @cavalre/desk",
+    "audit:high": "npm audit --audit-level=high"
   },
   "devDependencies": {
-    "tsx": "^4.19.0"
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "esbuild": "^0.25.5",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.4"
   },
   "engines": {
     "node": ">=22"
