@@ -143,6 +143,7 @@ button:hover {
 
 /* Circuit */
 .circuit-panel {
+  position: relative;
   background: linear-gradient(180deg, #0f141c, var(--panel));
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -150,33 +151,122 @@ button:hover {
   overflow: hidden;
 }
 
+.circuit-panel::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 40%,
+    rgba(91, 157, 255, 0.03) 50%,
+    transparent 60%
+  );
+  background-size: 200% 100%;
+  animation: scan 7s linear infinite;
+  opacity: 0.7;
+}
+
+.circuit-panel.has-data::after {
+  animation-duration: 4.5s;
+  opacity: 1;
+}
+
+@keyframes scan {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+.circuit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+  position: relative;
+  z-index: 1;
+}
+
 .circuit-panel h2 {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--muted);
 }
 
+.circuit-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.circuit-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent2);
+  box-shadow: 0 0 8px var(--accent2);
+  animation: livepulse 1.8s ease-in-out infinite;
+}
+
+@keyframes livepulse {
+  0%,
+  100% {
+    transform: scale(0.85);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+
 .circuit-svg {
   width: 100%;
-  height: 140px;
+  height: 148px;
   display: block;
+  position: relative;
+  z-index: 1;
+}
+
+.circuit-bus {
+  stroke: url(#wireGrad);
+  stroke-width: 3;
+  opacity: 0.45;
 }
 
 .circuit-node {
-  transition: filter 0.25s, opacity 0.25s;
+  transition: filter 0.25s;
 }
 
 .circuit-node.hot {
-  filter: drop-shadow(0 0 8px var(--accent2));
+  filter: drop-shadow(0 0 10px rgba(0, 229, 192, 0.55));
+  animation: nodeflash 0.9s ease-out;
+}
+
+@keyframes nodeflash {
+  0% {
+    filter: drop-shadow(0 0 16px rgba(0, 229, 192, 0.9));
+  }
+  100% {
+    filter: drop-shadow(0 0 10px rgba(0, 229, 192, 0.55));
+  }
 }
 
 .circuit-node rect {
   fill: #121a26;
   stroke: #2a3548;
   stroke-width: 1.5;
-  transition: stroke 0.2s, fill 0.2s;
+  transition: stroke 0.25s, fill 0.25s;
 }
 
 .circuit-node.hot rect {
@@ -189,46 +279,80 @@ button:hover {
   font-family: var(--mono);
   font-size: 10px;
   text-anchor: middle;
+  transition: fill 0.2s;
 }
 
 .circuit-node.hot text {
   fill: var(--text);
 }
 
+.listen-ring {
+  fill: none;
+  stroke: rgba(0, 229, 192, 0.35);
+  stroke-width: 1;
+  animation: ring 2.4s ease-out infinite;
+}
+
+@keyframes ring {
+  0% {
+    r: 22;
+    opacity: 0.55;
+  }
+  100% {
+    r: 36;
+    opacity: 0;
+  }
+}
+
 .circuit-wire {
   stroke: #243044;
   stroke-width: 2;
   fill: none;
+  stroke-linecap: round;
 }
 
 .circuit-wire.active {
   stroke: var(--accent);
-  stroke-dasharray: 6 8;
-  animation: wireflow 0.8s linear infinite;
+  stroke-dasharray: 5 7;
+  animation: wireflow 0.65s linear infinite;
+  filter: drop-shadow(0 0 3px rgba(91, 157, 255, 0.5));
 }
 
 @keyframes wireflow {
   to {
-    stroke-dashoffset: -28;
+    stroke-dashoffset: -24;
   }
 }
 
 .circuit-particle {
+  fill: rgba(91, 157, 255, 0.85);
+}
+
+.circuit-particle.hot {
   fill: var(--accent2);
-  filter: drop-shadow(0 0 4px var(--accent2));
+}
+
+.circuit-trail {
+  fill: rgba(91, 157, 255, 0.5);
+}
+
+.circuit-trail.hot {
+  fill: rgba(0, 229, 192, 0.55);
 }
 
 .stream-ticker {
   display: flex;
   gap: 8px;
   overflow: hidden;
-  margin-top: 8px;
+  margin-top: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--border);
   font-family: var(--mono);
   font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
+  position: relative;
+  z-index: 1;
 }
 
 .stream-ticker .item {
