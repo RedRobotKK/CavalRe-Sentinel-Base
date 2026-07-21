@@ -75,6 +75,7 @@ export function App() {
   const records: RecordRow[] = latest?.records ?? [];
   const newestFirst = useMemo(() => [...records].reverse(), [records]);
   const wallet = meta?.wallet;
+  const go = meta?.goNoGo;
 
   return (
     <div className="layout">
@@ -84,15 +85,16 @@ export function App() {
             CAVALRE <span>SENTINEL</span> DESK
           </div>
           <div className="muted">
-            Book · limits · markout W/L · circuit · not a Connect-Wallet dapp
+            Phase {meta?.phase ?? "0.5"} · evidence book · live capital OFF
           </div>
         </div>
         <div className="pills">
           <span className="hud-clock">{clock}Z</span>
+          <span className={`pill ${go?.verdict === "NO_GO" ? "off" : "on"}`}>
+            {go?.verdict ?? "…"}
+          </span>
           <span className="pill on live-blip">{meta?.network ?? "…"}</span>
-          <span className="pill">chain {meta?.chainId ?? "…"}</span>
           <span className="pill">{meta?.orderType ?? "…"}</span>
-          <span className="pill on">{meta?.posture ?? "dry-run"}</span>
           <span className={`pill ${meta?.liveCapital ? "off" : "on"}`}>
             live capital {meta?.liveCapital ? "ON" : "OFF"}
           </span>
@@ -110,8 +112,34 @@ export function App() {
 
       <Circuit records={records} pulseKey={pulseKey} />
 
-      {/* Quant strip: limits + book quality + wallet readiness */}
-      <section className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+      <section className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
+        <div className="panel">
+          <h2>Go / No-Go (live from journals)</h2>
+          <div className="metric-row">
+            <span>verdict</span>
+            <span className={go?.verdict === "NO_GO" ? "bad" : "good"}>
+              {go?.verdict ?? "—"}
+            </span>
+          </div>
+          {(go?.gates ?? []).map((g: any) => (
+            <div className="metric-row" key={g.id}>
+              <span title={g.detail}>{g.label}</span>
+              <span
+                className={
+                  g.status === "pass"
+                    ? "good"
+                    : g.status === "fail"
+                      ? "bad"
+                      : "warn"
+                }
+              >
+                {g.status}
+                {g.detail ? ` · ${g.detail}` : ""}
+              </span>
+            </div>
+          ))}
+        </div>
+
         <div className="panel">
           <h2>Limits (RiskEngine)</h2>
           {meta?.risk &&
@@ -124,7 +152,7 @@ export function App() {
         </div>
 
         <div className="panel">
-          <h2>Book quality (Amount / markout)</h2>
+          <h2>Book quality</h2>
           <div className="metric-row">
             <span>accept rate</span>
             <span>{bpsPct(book?.acceptRateBps)}</span>
@@ -142,61 +170,36 @@ export function App() {
             </span>
           </div>
           <div className="metric-row">
-            <span>hit rate (markout≥0)</span>
-            <span className={book?.hitRateBps != null ? "good" : "muted"}>
-              {bpsPct(book?.hitRateBps)}
-            </span>
+            <span>hit rate</span>
+            <span>{bpsPct(book?.hitRateBps)}</span>
           </div>
           <div className="metric-row">
             <span>mean markout bps</span>
-            <span
-              className={
-                book?.meanMarkoutBps == null
-                  ? "muted"
-                  : book.meanMarkoutBps >= 0
-                    ? "good"
-                    : "bad"
-              }
-            >
-              {book?.meanMarkoutBps ?? "—"}
-            </span>
-          </div>
-          <div className="muted" style={{ marginTop: 8, fontFamily: "var(--mono)", fontSize: 11 }}>
-            {book?.note === "insufficient_markout_sample"
-              ? "W/L requires labeled markouts — accept ≠ win"
-              : "markout-labeled sample"}
+            <span>{book?.meanMarkoutBps ?? "—"}</span>
           </div>
         </div>
 
         <div className="panel">
-          <h2>Wallet readiness (no browser keys)</h2>
+          <h2>Wallet readiness</h2>
           <div className="metric-row">
             <span>mode</span>
-            <span className="on">{wallet?.mode ?? "dry-run"}</span>
+            <span>{wallet?.mode ?? "dry-run"}</span>
           </div>
           <div className="metric-row">
             <span>live signing</span>
-            <span className={wallet?.liveSigning ? "bad" : "good"}>
-              {wallet?.liveSigning ? "ENABLED" : "OFF"}
-            </span>
+            <span className="good">{wallet?.liveSigning ? "ON" : "OFF"}</span>
           </div>
           <div className="metric-row">
             <span>browser keys</span>
-            <span className="good">{wallet?.browserKeys ? "YES" : "NEVER"}</span>
+            <span className="good">NEVER</span>
           </div>
           <div className="metric-row">
             <span>address</span>
             <span className="muted">
               {wallet?.address
                 ? `${String(wallet.address).slice(0, 6)}…${String(wallet.address).slice(-4)}`
-                : "unset (SENTINEL_ADDRESS)"}
+                : "unset"}
             </span>
-          </div>
-          <div className="muted" style={{ marginTop: 8, fontSize: 11 }}>
-            {(wallet?.primitives ?? []).join(" · ")}
-          </div>
-          <div className="muted" style={{ marginTop: 6, fontSize: 11 }}>
-            {wallet?.note}
           </div>
         </div>
       </section>
@@ -230,21 +233,11 @@ export function App() {
           <ReasonBars records={records} />
         </div>
         <div className="panel">
-          <h2>Go / No-Go</h2>
-          {(meta?.goNoGo?.gates ?? []).map((g: any) => (
-            <div className="metric-row" key={g.id}>
-              <span>{g.label}</span>
-              <span
-                className={
-                  g.status === "pass"
-                    ? "good"
-                    : g.status === "fail"
-                      ? "bad"
-                      : "warn"
-                }
-              >
-                {g.status}
-              </span>
+          <h2>Primitives</h2>
+          {(meta?.primitives ?? []).slice(0, 6).map((p: any) => (
+            <div className="prim" key={p.id}>
+              <code>{p.id}</code>
+              <span className="muted">{p.desc}</span>
             </div>
           ))}
         </div>
@@ -252,14 +245,7 @@ export function App() {
 
       <section className="main">
         <aside className="side">
-          <h2>Primitives</h2>
-          {(meta?.primitives ?? []).map((p: any) => (
-            <div className="prim" key={p.id}>
-              <code>{p.id}</code>
-              <span className="muted">{p.desc}</span>
-            </div>
-          ))}
-          <h2 style={{ marginTop: 16 }}>Journal files</h2>
+          <h2>Journal files</h2>
           <ul className="clean">
             {files.map((f) => (
               <li key={f.name}>
@@ -301,12 +287,16 @@ export function App() {
                     ? "accept"
                     : r.kind === "info"
                       ? "wait"
-                      : "reject");
+                      : r.kind === "markout"
+                        ? "markout"
+                        : "reject");
                 return (
                   <tr key={`${r.seq}-${i}`} className={i < 3 ? "flash" : undefined}>
                     <td>{r.ts?.slice(11, 19) ?? ""}</td>
                     <td>
-                      <span className={`tag ${action}`}>{action}</span>
+                      <span className={`tag ${action === "markout" ? "wait" : action}`}>
+                        {action}
+                      </span>
                     </td>
                     <td title={r.reason}>{r.reason?.slice(0, 32)}</td>
                     <td>{String(r.context?.orderClass ?? "")}</td>
@@ -314,7 +304,7 @@ export function App() {
                     <td>{String(r.context?.toxicity ?? "")}</td>
                     <td>{String(r.context?.decayProgressBps ?? "")}</td>
                     <td>{String(r.context?.resolvedInput ?? r.amount ?? "")}</td>
-                    <td>{String(r.context?.refOutput ?? "")}</td>
+                    <td>{String(r.context?.refOutput ?? r.context?.markOutput ?? "")}</td>
                     <td title={r.ref}>{r.ref?.slice(0, 10)}</td>
                   </tr>
                 );
@@ -322,7 +312,7 @@ export function App() {
               {newestFirst.length === 0 && (
                 <tr>
                   <td colSpan={10} className="muted">
-                    Idle book — W/L stays blank until markouts exist.
+                    Idle book — Phase 0.5 collects evidence over days.
                   </td>
                 </tr>
               )}

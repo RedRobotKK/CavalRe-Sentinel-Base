@@ -1,12 +1,9 @@
 #!/usr/bin/env node
 /**
- * Shadow markout labeler for research production (Phase 0.5).
+ * Shadow markout labeler (Phase 0.5).
+ * Only labels quote_accepted rows whose age >= windowSec (true delayed mark).
  *
- * Usage:
- *   export BASE_RPC_URL=https://mainnet.base.org
- *   npm run shadow-markout
  *   npm run shadow-markout -- --windows 30,120
- *   npm run shadow-markout -- --window 120 --dir journals
  */
 
 import { readdir, readFile, appendFile } from "node:fs/promises";
@@ -32,12 +29,12 @@ const WINDOWS = windowsRaw
   .map((s) => Number(s.trim()))
   .filter((n) => Number.isFinite(n) && n > 0);
 const RPC = process.env.BASE_RPC_URL ?? DEFAULT_BASE_RPC;
+const NOW = Date.now();
 const referenceCostFn = createUniswapV3ReferenceCost({ rpcUrl: RPC });
 
 async function listJsonl() {
   try {
-    const names = await readdir(JOURNAL_DIR);
-    return names.filter((n) => n.endsWith(".jsonl")).sort();
+    return (await readdir(JOURNAL_DIR)).filter((n) => n.endsWith(".jsonl")).sort();
   } catch {
     return [];
   }
@@ -69,6 +66,13 @@ function alreadyMarked(records, ref, windowSec) {
   );
 }
 
+function ageSec(iso) {
+  if (!iso) return 0;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return 0;
+  return Math.floor((NOW - t) / 1000);
+}
+
 function wireMarkout(seq, accept, annotation, markOut) {
   return {
     seq,
@@ -87,6 +91,8 @@ function wireMarkout(seq, accept, annotation, markOut) {
       windowSec: String(annotation.windowSec),
       toxic: annotation.toxic,
       markoutBps: annotation.markoutBps,
+      acceptTs: accept.ts ?? null,
+      ageSec: String(ageSec(accept.ts)),
       fillOutput: accept.context?.resolvedOutput ?? null,
       markOutput: markOut.toString(),
       inputToken: accept.context?.inputToken ?? null,
@@ -102,10 +108,17 @@ async function processFile(name, windowSec) {
   const records = await loadAll(path);
   const accepts = records.filter((r) => r.kind === "quote_accepted" && r.ref);
   let written = 0;
+  let skippedYoung = 0;
   let nextSeq = records.reduce((m, r) => Math.max(m, r.seq ?? 0), 0) + 1;
 
   for (const acc of accepts) {
     if (alreadyMarked(records, acc.ref, windowSec)) continue;
+
+    const age = ageSec(acc.ts);
+    if (age < windowSec) {
+      skippedYoung += 1;
+      continue;
+    }
 
     const resolvedIn = acc.context?.resolvedInput ?? acc.amount;
     const resolvedOut = acc.context?.resolvedOutput;
@@ -166,11 +179,12 @@ async function processFile(name, windowSec) {
         markoutBps: annotation.markoutBps,
         toxic: annotation.toxic,
         windowSec,
+        ageSec: age,
       })
     );
   }
 
-  return written;
+  return { written, skippedYoung };
 }
 
 const files = await listJsonl();
@@ -194,13 +208,17 @@ console.error(
     rpc: RPC,
     windows: WINDOWS,
     files: files.length,
+    ageGated: true,
   })
 );
 
 let total = 0;
+let young = 0;
 for (const w of WINDOWS) {
   for (const f of files) {
-    total += await processFile(f, w);
+    const r = await processFile(f, w);
+    total += r.written;
+    young += r.skippedYoung;
   }
 }
 
@@ -209,6 +227,7 @@ console.error(
     level: "info",
     message: "shadow-markout done",
     labeled: total,
+    skippedYoung: young,
     windows: WINDOWS,
   })
 );

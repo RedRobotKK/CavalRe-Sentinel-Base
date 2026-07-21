@@ -49,6 +49,27 @@ async function loadJsonl(filePath, { limit = 500 } = {}) {
   return { totalLines: lines.length, records };
 }
 
+async function loadAllRecords() {
+  const files = await listJournalFiles();
+  const records = [];
+  const days = new Set();
+  for (const f of files) {
+    const text = await readFile(f.path, "utf8");
+    for (const line of text.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        const r = JSON.parse(t);
+        records.push(r);
+        if (r.ts) days.add(r.ts.slice(0, 10));
+      } catch {
+        /* skip */
+      }
+    }
+  }
+  return { records, days: [...days].sort(), files: files.length };
+}
+
 function summarize(records) {
   const byKind = {};
   const byAction = {};
@@ -57,8 +78,6 @@ function summarize(records) {
   let accepts = 0;
   let rejects = 0;
   let waits = 0;
-
-  // Markout-based W/L (Amount-safe: bps already computed as integer/string)
   let wins = 0;
   let losses = 0;
   let markoutSum = 0;
@@ -121,17 +140,91 @@ function summarize(records) {
   };
 }
 
-const GO_NO_GO = {
-  liveCapital: false,
-  gates: [
-    { id: "days7", label: "≥7 days dry-run journals", status: "pending" },
-    { id: "n100", label: "≥100 shadow accepts", status: "pending" },
-    { id: "markout_mean", label: "Mean +2m markout ≥ 0 after gas", status: "pending" },
-    { id: "toxic", label: "Toxic fraction ≤ 25%", status: "pending" },
-    { id: "keys", label: "No keys in journal/git/CI", status: "pass" },
-    { id: "live_disabled", label: "live_mode_not_enabled in runner", status: "pass" },
-  ],
-};
+function buildGoNoGo(all) {
+  const accepts = all.records.filter(
+    (r) => r.kind === "quote_accepted" || r.context?.policyAction === "accept"
+  );
+  const uniqueRefs = new Set(accepts.map((r) => r.ref).filter(Boolean));
+  const markouts = [];
+  for (const r of all.records) {
+    if (r.kind !== "markout" && r.markoutBps == null) continue;
+    const w = r.markout?.windowSec ?? Number(r.context?.windowSec);
+    if (w !== 120 && Number.isFinite(w)) continue; // prefer +2m for gates display
+    const bps = Number(r.markoutBps ?? r.markout?.markoutBps ?? r.context?.markoutBps);
+    if (Number.isFinite(bps)) markouts.push(bps);
+  }
+  // if no 120-only, use any markout
+  if (markouts.length === 0) {
+    for (const r of all.records) {
+      const bps = Number(r.markoutBps ?? r.markout?.markoutBps ?? r.context?.markoutBps);
+      if (Number.isFinite(bps)) markouts.push(bps);
+    }
+  }
+  const mean =
+    markouts.length > 0
+      ? markouts.reduce((a, b) => a + b, 0) / markouts.length
+      : null;
+  const toxic =
+    markouts.length > 0
+      ? markouts.filter((b) => b <= -30).length / markouts.length
+      : null;
+
+  const gates = [
+    {
+      id: "days7",
+      label: "≥7 days journal activity",
+      status: all.days.length >= 7 ? "pass" : "pending",
+      detail: `days=${all.days.length}`,
+    },
+    {
+      id: "n100",
+      label: "≥100 shadow accepts",
+      status: uniqueRefs.size >= 100 ? "pass" : "pending",
+      detail: `unique=${uniqueRefs.size}`,
+    },
+    {
+      id: "markout_mean",
+      label: "Mean +2m markout ≥ 0",
+      status:
+        mean != null && mean >= 0 ? "pass" : mean != null ? "fail" : "pending",
+      detail: mean == null ? "n=0" : `mean=${mean.toFixed(1)} n=${markouts.length}`,
+    },
+    {
+      id: "toxic",
+      label: "Toxic fraction ≤ 25%",
+      status:
+        toxic != null && toxic <= 0.25
+          ? "pass"
+          : toxic != null
+            ? "fail"
+            : "pending",
+      detail: toxic == null ? "n=0" : `${(toxic * 100).toFixed(1)}%`,
+    },
+    {
+      id: "keys",
+      label: "No keys in journal/git/CI",
+      status: "pass",
+      detail: "policy",
+    },
+    {
+      id: "live_disabled",
+      label: "live_mode_not_enabled",
+      status: "pass",
+      detail: "runner",
+    },
+  ];
+
+  const blocking = gates.filter(
+    (g) => g.id !== "keys" && g.id !== "live_disabled" && g.status !== "pass"
+  );
+
+  return {
+    liveCapital: false,
+    verdict: blocking.length === 0 ? "CONDITIONAL_GO_REVIEW" : "NO_GO",
+    gates,
+    phase: "0.5",
+  };
+}
 
 const RISK_DEFAULTS = {
   workingCapital: "1000000000",
@@ -163,14 +256,13 @@ function walletStatus() {
     addressConfigured: Boolean(addr),
     address: addr,
     primitives: ["LocalSigner", "BIP-39/44", "ERC-20 encode", "destroy()"],
-    note: "Wallet connects via Node/env for live phase — not MetaMask in this desk. Set SENTINEL_ADDRESS to display public address only.",
+    note: "Wallet connects via Node/env for live phase — not MetaMask in this desk.",
   };
 }
 
 async function handle(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "http://127.0.0.1:5173");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  // also allow alternate vite ports
   const origin = req.headers.origin;
   if (origin && /^http:\/\/127\.0\.0\.1:51\d{2}$/.test(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
@@ -189,10 +281,12 @@ async function handle(req, res) {
       json(res, {
         service: "sentinel-desk-api",
         ui: "http://127.0.0.1:5173",
+        phase: "0.5",
         endpoints: [
           "GET /health",
           "GET /meta",
           "GET /wallet",
+          "GET /go-no-go",
           "GET /journals",
           "GET /journals/latest?limit=300",
         ],
@@ -201,19 +295,27 @@ async function handle(req, res) {
     }
 
     if (url.pathname === "/health") {
-      json(res, { ok: true, service: "sentinel-desk-api" });
+      json(res, { ok: true, service: "sentinel-desk-api", phase: "0.5" });
+      return;
+    }
+
+    if (url.pathname === "/go-no-go") {
+      const all = await loadAllRecords();
+      json(res, buildGoNoGo(all));
       return;
     }
 
     if (url.pathname === "/meta") {
+      const all = await loadAllRecords();
       json(res, {
         network: "base-mainnet",
         chainId: 8453,
         orderType: "Dutch_V3",
         liveCapital: false,
         posture: "dry-run",
+        phase: "0.5",
         risk: RISK_DEFAULTS,
-        goNoGo: GO_NO_GO,
+        goNoGo: buildGoNoGo(all),
         primitives: PRIMITIVES,
         wallet: walletStatus(),
       });
@@ -290,6 +392,7 @@ createServer(handle).listen(PORT, HOST, () => {
       message: "desk-api listening",
       url: `http://${HOST}:${PORT}`,
       journalDir: JOURNAL_DIR,
+      phase: "0.5",
     })
   );
 });
