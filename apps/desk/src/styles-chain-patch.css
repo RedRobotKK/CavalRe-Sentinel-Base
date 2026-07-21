@@ -1,0 +1,8 @@
+/* applied via note - update chain opacity in styles if needed */
+.chain-particles {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 1;
+}
