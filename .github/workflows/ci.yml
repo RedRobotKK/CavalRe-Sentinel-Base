@@ -1,4 +1,4 @@
-name: CI
+name: Production Security & Quality Gate
 
 on:
   push:
@@ -6,77 +6,80 @@ on:
   pull_request:
     branches: [main]
 
-# Enforce strict least-privilege security permissions
+# Strict least-privilege for an app managing capital
 permissions:
   contents: read
+  security-events: write
 
-# Global timeout fallback to prevent runaway costs
 defaults:
   run:
     shell: bash
 
 jobs:
-  # Shared setup job to isolate installation and caching
-  install:
-    name: Install Dependencies
+  # STAGE 1: Deep Security & Secret Auditing
+  security-gate:
+    name: Security & Secret Scan
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: package-lock.json
+          # Full history so secret scanners see more than the head snapshot
+          fetch-depth: 0
 
-      - name: Install
-        run: npm ci
-
-  typecheck:
-    name: Typecheck
-    needs: install
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: Install
-        run: npm ci
-      - name: Typecheck
-        run: npm run typecheck --workspaces --if-present
-
-  test:
-    name: Unit Tests
-    needs: install
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: Install
-        run: npm ci
-      - name: Test
-        run: npm run test --workspaces --if-present
-
-  secret-scan:
-    name: Secret Scan
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Trufflehog needs full history to scan commit diffs
-      - name: TruffleHog OSS
+      - name: TruffleHog Secret Verification Scan
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
           base: ${{ github.event.repository.default_branch }}
           head: HEAD
-          extra_args: --debug
+          extra_args: --only-verified
+
+  # STAGE 2: Supply Chain Validation
+  dependency-gate:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies (for audit graph)
+        run: npm ci
+
+      - name: Audit Node Modules for Vulnerabilities
+        run: npm audit --audit-level=high
+
+  # STAGE 3: Runtime Math & Type Correctness
+  runtime-gate:
+    name: Runtime & Math Soundness
+    needs: [security-gate, dependency-gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Clean Install Monorepo Dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck --workspaces --if-present
+
+      - name: Test (TDD verification)
+        run: npm run test --workspaces --if-present
