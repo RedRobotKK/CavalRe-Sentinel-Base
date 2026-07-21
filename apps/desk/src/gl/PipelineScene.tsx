@@ -60,6 +60,27 @@ function makeLabelTexture(s: StageVisual, active: boolean): THREE.CanvasTexture 
   return tex;
 }
 
+/** Soft hex-digit column texture for rain */
+function makeHexRainTexture(): THREE.CanvasTexture {
+  const w = 64;
+  const h = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  ctx.clearRect(0, 0, w, h);
+  const chars = "0123456789abcdef";
+  ctx.font = "14px monospace";
+  ctx.textAlign = "center";
+  for (let y = 0; y < 18; y++) {
+    ctx.fillStyle = `rgba(255, ${140 + (y % 5) * 15}, 30, ${0.15 + (y % 3) * 0.08})`;
+    ctx.fillText(chars[(y * 7) % 16]!, w / 2, 14 + y * 14);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
 export function PipelineScene({
   pulseKey = 0,
   activeStage = 2,
@@ -98,151 +119,144 @@ export function PipelineScene({
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x060301, 0.022);
+    scene.fog = new THREE.FogExp2(0x060301, 0.02);
 
-    const camera = new THREE.PerspectiveCamera(36, 2, 0.1, 80);
+    const camera = new THREE.PerspectiveCamera(36, 2, 0.1, 100);
     camera.position.set(0, 4.4, 13.5);
     camera.lookAt(0, 0.35, 0);
 
-    scene.add(new THREE.AmbientLight(0xff9a1a, 0.65));
+    scene.add(new THREE.AmbientLight(0xff9a1a, 0.6));
     const key = new THREE.PointLight(0xffc266, 2.4, 55);
     key.position.set(0, 7, 8);
     scene.add(key);
 
-    const grid = new THREE.GridHelper(42, 42, 0x7a4212, 0x281808);
-    grid.position.y = -1.5;
+    // floor grid — softer
+    const grid = new THREE.GridHelper(48, 48, 0x6a3a10, 0x1e1208);
+    grid.position.y = -1.55;
     const gm = grid.material as THREE.Material | THREE.Material[];
     if (Array.isArray(gm)) {
       gm.forEach((m) => {
         m.transparent = true;
-        m.opacity = 0.32;
+        m.opacity = 0.28;
       });
     } else {
       gm.transparent = true;
-      gm.opacity = 0.32;
+      gm.opacity = 0.28;
     }
     scene.add(grid);
 
-    // ——— translucent blockchain network (BEHIND stages, z < 0) ———
-    const chainGroup = new THREE.Group();
-    chainGroup.position.z = -3.5;
-    scene.add(chainGroup);
+    // ——— CREATIVE BACKDROP (full hero space, translucent) ———
+    const bg = new THREE.Group();
+    scene.add(bg);
 
-    const CCOLS = 9;
-    const CROWS = 4;
-    const CN = CCOLS * CROWS;
-    const cPos = new Float32Array(CN * 3);
-    const cBlocks: THREE.Mesh[] = [];
-    const cGeo = new THREE.BoxGeometry(0.42, 0.28, 0.42);
-
-    for (let r = 0; r < CROWS; r++) {
-      for (let c = 0; c < CCOLS; c++) {
-        const i = r * CCOLS + c;
-        const x = (c - (CCOLS - 1) / 2) * 2.8 + (r % 2) * 1.3;
-        const y = (r - (CROWS - 1) / 2) * 1.7 + 0.8;
-        const z = (Math.sin(c * 0.8 + r) * 0.8);
-        cPos[i * 3] = x;
-        cPos[i * 3 + 1] = y;
-        cPos[i * 3 + 2] = z;
-
-        const mat = new THREE.MeshBasicMaterial({
-          color: 0xff9a1a,
-          transparent: true,
-          opacity: 0.12,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-        });
-        const mesh = new THREE.Mesh(cGeo, mat);
-        mesh.position.set(x, y, z);
-        mesh.rotation.y = 0.35;
-        chainGroup.add(mesh);
-        cBlocks.push(mesh);
-      }
+    // 1) Large orbital rings (consensus orbits)
+    const orbits: THREE.Mesh[] = [];
+    for (let i = 0; i < 4; i++) {
+      const radius = 4.5 + i * 2.2;
+      const geo = new THREE.TorusGeometry(radius, 0.012, 8, 96);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xff9f1a,
+        transparent: true,
+        opacity: 0.07 + i * 0.015,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.rotation.x = Math.PI / 2.4 + i * 0.08;
+      mesh.rotation.z = i * 0.4;
+      mesh.position.y = -0.4 + i * 0.15;
+      bg.add(mesh);
+      orbits.push(mesh);
     }
 
-    const cEdges: number[] = [];
-    for (let i = 0; i < CN; i++) {
-      for (let j = i + 1; j < CN; j++) {
-        const d = Math.hypot(
-          cPos[i * 3]! - cPos[j * 3]!,
-          cPos[i * 3 + 1]! - cPos[j * 3 + 1]!,
-          cPos[i * 3 + 2]! - cPos[j * 3 + 2]!
-        );
-        if (d < 3.4) {
-          cEdges.push(
-            cPos[i * 3]!,
-            cPos[i * 3 + 1]!,
-            cPos[i * 3 + 2]!,
-            cPos[j * 3]!,
-            cPos[j * 3 + 1]!,
-            cPos[j * 3 + 2]!
-          );
-        }
-      }
+    // 2) Hex-digit rain planes (subtle columns)
+    const rainTex = makeHexRainTexture();
+    const rains: THREE.Mesh[] = [];
+    for (let i = 0; i < 12; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        map: rainTex,
+        transparent: true,
+        opacity: 0.11,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      });
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 6.5), mat);
+      plane.position.set(
+        (i - 5.5) * 2.1,
+        1.2,
+        -5.5 - (i % 3) * 1.2
+      );
+      plane.rotation.y = Math.sin(i) * 0.15;
+      bg.add(plane);
+      rains.push(plane);
     }
-    const cEdgeGeo = new THREE.BufferGeometry();
-    cEdgeGeo.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(cEdges, 3)
-    );
-    const cEdgeMat = new THREE.LineBasicMaterial({
-      color: 0xff8c1a,
+
+    // 3) Far particle nebula (depth)
+    const NEB = 280;
+    const nebPos = new Float32Array(NEB * 3);
+    for (let i = 0; i < NEB; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 6 + Math.random() * 16;
+      nebPos[i * 3] = Math.cos(a) * r;
+      nebPos[i * 3 + 1] = (Math.random() - 0.35) * 8;
+      nebPos[i * 3 + 2] = Math.sin(a) * r * 0.55 - 4;
+    }
+    const nebGeo = new THREE.BufferGeometry();
+    nebGeo.setAttribute("position", new THREE.BufferAttribute(nebPos, 3));
+    const nebMat = new THREE.PointsMaterial({
+      color: 0xc47a22,
+      size: 0.06,
       transparent: true,
-      opacity: 0.09,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    chainGroup.add(new THREE.LineSegments(cEdgeGeo, cEdgeMat));
-
-    // hopping packets on the translucent chain
-    const CPKT = 70;
-    const cpPos = new Float32Array(CPKT * 3);
-    const cpFrom = new Float32Array(CPKT * 3);
-    const cpTo = new Float32Array(CPKT * 3);
-    const cpPhase = new Float32Array(CPKT);
-    const cpSpeed = new Float32Array(CPKT);
-
-    function pickChainHop(i: number) {
-      const a = Math.floor(Math.random() * CN);
-      let b = Math.floor(Math.random() * CN);
-      for (let t = 0; t < 8; t++) {
-        const cand = Math.floor(Math.random() * CN);
-        const d = Math.hypot(
-          cPos[a * 3]! - cPos[cand * 3]!,
-          cPos[a * 3 + 1]! - cPos[cand * 3 + 1]!,
-          cPos[a * 3 + 2]! - cPos[cand * 3 + 2]!
-        );
-        if (d < 3.5 && cand !== a) {
-          b = cand;
-          break;
-        }
-      }
-      cpFrom[i * 3] = cPos[a * 3]!;
-      cpFrom[i * 3 + 1] = cPos[a * 3 + 1]!;
-      cpFrom[i * 3 + 2] = cPos[a * 3 + 2]!;
-      cpTo[i * 3] = cPos[b * 3]!;
-      cpTo[i * 3 + 1] = cPos[b * 3 + 1]!;
-      cpTo[i * 3 + 2] = cPos[b * 3 + 2]!;
-      cpPhase[i] = 0;
-      cpSpeed[i] = 0.18 + Math.random() * 0.28;
-    }
-    for (let i = 0; i < CPKT; i++) {
-      pickChainHop(i);
-      cpPhase[i] = Math.random();
-    }
-
-    const cpGeo = new THREE.BufferGeometry();
-    cpGeo.setAttribute("position", new THREE.BufferAttribute(cpPos, 3));
-    const cpMat = new THREE.PointsMaterial({
-      color: 0xffe0a0,
-      size: 0.11,
-      transparent: true,
-      opacity: 0.4,
+      opacity: 0.35,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       sizeAttenuation: true,
     });
-    chainGroup.add(new THREE.Points(cpGeo, cpMat));
+    bg.add(new THREE.Points(nebGeo, nebMat));
+
+    // 4) Propagation waves on the floor
+    const waves: THREE.Mesh[] = [];
+    for (let i = 0; i < 3; i++) {
+      const geo = new THREE.RingGeometry(0.3, 0.38, 64);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xffb000,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.y = -1.52;
+      bg.add(mesh);
+      waves.push(mesh);
+    }
+    let waveClock = 0;
+
+    // 5) Slow drifting “shard” planes (glass blocks in depth)
+    const shards: THREE.Mesh[] = [];
+    const shardGeo = new THREE.BoxGeometry(0.7, 0.45, 0.08);
+    for (let i = 0; i < 18; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xff9a1a,
+        transparent: true,
+        opacity: 0.06,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(shardGeo, mat);
+      mesh.position.set(
+        (Math.random() - 0.5) * 22,
+        (Math.random() - 0.2) * 5,
+        -3 - Math.random() * 8
+      );
+      mesh.rotation.set(Math.random(), Math.random(), Math.random());
+      bg.add(mesh);
+      shards.push(mesh);
+    }
 
     // ——— foreground stage pipeline ———
     const spacing = 2.5;
@@ -261,7 +275,7 @@ export function PipelineScene({
     const busMat = new THREE.MeshBasicMaterial({
       color: 0xff9f1a,
       transparent: true,
-      opacity: 0.4,
+      opacity: 0.42,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -305,31 +319,12 @@ export function PipelineScene({
       color: 0xffe0a0,
       size: 0.12,
       transparent: true,
-      opacity: 0.8,
+      opacity: 0.85,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       sizeAttenuation: true,
     });
     scene.add(new THREE.Points(pktGeo, pktMat));
-
-    const pulseRings: THREE.Mesh[] = [];
-    for (let k = 0; k < 2; k++) {
-      const g = new THREE.RingGeometry(0.22, 0.3, 48);
-      const m = new THREE.MeshBasicMaterial({
-        color: 0xffb000,
-        transparent: true,
-        opacity: 0,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const mesh = new THREE.Mesh(g, m);
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.position.y = -1.45;
-      scene.add(mesh);
-      pulseRings.push(mesh);
-    }
-    let ringT = 99;
 
     let raf = 0;
     let alive = true;
@@ -371,10 +366,10 @@ export function PipelineScene({
       if (pulseRef.current !== lastPulse) {
         lastPulse = pulseRef.current;
         burst = 1;
-        ringT = 0;
+        waveClock = 0;
       }
       burst *= 0.94;
-      ringT += 0.016;
+      waveClock += 0.016;
 
       const sig =
         active +
@@ -385,37 +380,61 @@ export function PipelineScene({
         refreshTextures(active);
       }
 
-      camera.position.x = Math.sin(t * 0.06) * 0.18;
-      camera.position.y = 4.35 + Math.sin(t * 0.05) * 0.06;
+      camera.position.x = Math.sin(t * 0.05) * 0.15;
+      camera.position.y = 4.35 + Math.sin(t * 0.04) * 0.05;
       camera.position.z = 13.4;
       camera.lookAt(0, 0.4, 0);
 
-      // translucent chain animation
-      chainGroup.rotation.y = Math.sin(t * 0.08) * 0.12;
-      for (let i = 0; i < cBlocks.length; i++) {
-        const m = cBlocks[i]!;
-        const mat = m.material as THREE.MeshBasicMaterial;
-        const breath = 0.5 + 0.5 * Math.sin(t * 1.1 + i * 0.4);
-        mat.opacity = 0.07 + breath * 0.07 + burst * 0.08;
-        m.position.y = cPos[i * 3 + 1]! + Math.sin(t * 0.85 + i * 0.25) * 0.06;
-      }
-      const cpos = cpGeo.attributes.position as THREE.BufferAttribute;
-      for (let i = 0; i < CPKT; i++) {
-        cpPhase[i] = (cpPhase[i]! + 0.016 * cpSpeed[i]!) % 1;
-        if (cpPhase[i]! < 0.016 * cpSpeed[i]!) pickChainHop(i);
-        const s = cpPhase[i]! * cpPhase[i]! * (3 - 2 * cpPhase[i]!);
-        cpos.setXYZ(
-          i,
-          cpFrom[i * 3]! + (cpTo[i * 3]! - cpFrom[i * 3]!) * s,
-          cpFrom[i * 3 + 1]! + (cpTo[i * 3 + 1]! - cpFrom[i * 3 + 1]!) * s,
-          cpFrom[i * 3 + 2]! + (cpTo[i * 3 + 2]! - cpFrom[i * 3 + 2]!) * s
-        );
-      }
-      cpos.needsUpdate = true;
-      cpMat.opacity = 0.28 + burst * 0.2 + inten * 0.12;
-      cEdgeMat.opacity = 0.07 + burst * 0.05;
+      // orbits spin slowly, different rates
+      orbits.forEach((o, i) => {
+        o.rotation.z = t * (0.04 + i * 0.015) * (i % 2 === 0 ? 1 : -1);
+        const mat = o.material as THREE.MeshBasicMaterial;
+        mat.opacity = 0.06 + i * 0.012 + burst * 0.05;
+      });
 
-      // stage blocks
+      // hex rain scrolls
+      rainTex.offset.y = (t * 0.12) % 1;
+      rains.forEach((p, i) => {
+        p.position.y = 1.2 + Math.sin(t * 0.3 + i) * 0.2;
+        const mat = p.material as THREE.MeshBasicMaterial;
+        mat.opacity = 0.08 + (i % 3) * 0.02 + burst * 0.04;
+      });
+
+      // nebula drift
+      const np = nebGeo.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < NEB; i++) {
+        let y = np.getY(i) + 0.004 * ((i % 4) + 1);
+        if (y > 5) y = -3;
+        np.setY(i, y);
+      }
+      np.needsUpdate = true;
+      nebMat.opacity = 0.28 + burst * 0.12;
+
+      // floor propagation waves
+      waves.forEach((w, i) => {
+        const wt = waveClock - i * 0.35;
+        const mat = w.material as THREE.MeshBasicMaterial;
+        if (wt < 0 || wt > 2.4) {
+          mat.opacity = 0;
+        } else {
+          const s = 0.4 + wt * 5.5;
+          w.scale.set(s, s, s);
+          mat.opacity = (1 - wt / 2.4) * 0.22;
+        }
+      });
+      // ambient slow waves even without pulse
+      if (waveClock > 4) waveClock = 0;
+
+      // shards tumble slowly in the distance
+      shards.forEach((s, i) => {
+        s.rotation.x += 0.002 + (i % 3) * 0.0005;
+        s.rotation.y += 0.003;
+        s.position.x += Math.sin(t * 0.2 + i) * 0.002;
+        const mat = s.material as THREE.MeshBasicMaterial;
+        mat.opacity = 0.04 + 0.03 * Math.sin(t + i);
+      });
+
+      // stages
       for (let i = 0; i < N; i++) {
         const mesh = nodes[i]!;
         const mat = materials[i]!;
@@ -447,21 +466,6 @@ export function PipelineScene({
       pos.needsUpdate = true;
       pktMat.opacity = 0.5 + inten * 0.25 + burst * 0.25;
 
-      const ax = x0 + active * spacing;
-      for (let k = 0; k < pulseRings.length; k++) {
-        const ring = pulseRings[k]!;
-        const rt = ringT - k * 0.22;
-        const mat = ring.material as THREE.MeshBasicMaterial;
-        if (rt < 0 || rt > 1.3) {
-          mat.opacity = 0;
-        } else {
-          const s = 0.5 + rt * 3.2;
-          ring.scale.set(s, s, s);
-          ring.position.x = ax;
-          mat.opacity = (1 - rt / 1.3) * 0.32;
-        }
-      }
-
       busMat.opacity = 0.32 + (active / N) * 0.25 + burst * 0.12;
       key.intensity = 2.2 + burst * 1.2 + inten * 0.4;
 
@@ -477,12 +481,11 @@ export function PipelineScene({
       boxGeo.dispose();
       busGeo.dispose();
       pktGeo.dispose();
-      cGeo.dispose();
-      cEdgeGeo.dispose();
-      cpGeo.dispose();
+      nebGeo.dispose();
+      shardGeo.dispose();
+      rainTex.dispose();
       textures.forEach((t) => t.dispose());
       materials.forEach((m) => m.dispose());
-      cBlocks.forEach((m) => (m.material as THREE.Material).dispose());
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) {
         mount.removeChild(renderer.domElement);
