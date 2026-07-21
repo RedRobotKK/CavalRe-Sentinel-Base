@@ -1,4 +1,4 @@
-/* Full-bleed hero pipeline */
+/* Full-bleed hero — larger type target */
 .chain-stage {
   position: relative;
   z-index: 1;
@@ -7,12 +7,12 @@
   border: 1px solid rgba(92, 51, 16, 0.55);
   background: #050201;
   overflow: hidden;
-  min-height: 320px;
+  min-height: 360px;
 }
 
 .chain-stage-3d {
-  min-height: 340px;
-  height: clamp(300px, 38vh, 420px);
+  min-height: 380px;
+  height: clamp(340px, 42vh, 480px);
 }
 
 .pipeline-scene {

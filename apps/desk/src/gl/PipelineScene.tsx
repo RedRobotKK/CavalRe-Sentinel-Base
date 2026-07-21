@@ -20,38 +20,42 @@ const DEFAULT_STAGES: StageVisual[] = [
 
 function makeLabelTexture(s: StageVisual, active: boolean): THREE.CanvasTexture {
   const w = 512;
-  const h = 384;
+  const h = 400;
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d")!;
 
   const grd = ctx.createLinearGradient(0, 0, 0, h);
-  grd.addColorStop(0, active ? "#3a2010" : "#1a1008");
-  grd.addColorStop(1, active ? "#1a0c04" : "#0c0804");
+  grd.addColorStop(0, active ? "#4a2810" : "#24160c");
+  grd.addColorStop(1, active ? "#1c0e06" : "#100a04");
   ctx.fillStyle = grd;
   ctx.fillRect(0, 0, w, h);
 
-  ctx.strokeStyle = active ? "#ffc266" : "#6a3a12";
-  ctx.lineWidth = active ? 10 : 6;
-  ctx.strokeRect(8, 8, w - 16, h - 16);
+  ctx.strokeStyle = active ? "#ffc266" : "#a06020";
+  ctx.lineWidth = active ? 14 : 8;
+  ctx.strokeRect(10, 10, w - 20, h - 20);
 
-  ctx.fillStyle = active ? "#ffb000" : "#c47a22";
-  ctx.font = "bold 56px \"IBM Plex Mono\", ui-monospace, monospace";
+  // stage name — large
+  ctx.fillStyle = active ? "#ffe0a0" : "#ffb84d";
+  ctx.font = "bold 72px \"IBM Plex Mono\", ui-monospace, monospace";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.shadowColor = active ? "rgba(255,176,0,0.55)" : "transparent";
-  ctx.shadowBlur = active ? 18 : 0;
-  ctx.fillText(s.label, w / 2, 90);
+  ctx.shadowColor = "rgba(255,176,0,0.5)";
+  ctx.shadowBlur = active ? 20 : 8;
+  ctx.fillText(s.label, w / 2, 95);
 
-  ctx.shadowBlur = 0;
+  // pass count — dominant
+  ctx.shadowBlur = active ? 24 : 6;
   ctx.fillStyle = "#ffb000";
-  ctx.font = "bold 110px \"IBM Plex Mono\", ui-monospace, monospace";
-  ctx.fillText(String(s.pass), w / 2, 210);
+  ctx.font = "bold 140px \"IBM Plex Mono\", ui-monospace, monospace";
+  ctx.fillText(String(s.pass), w / 2, 230);
 
-  ctx.fillStyle = s.drop > 0 ? "#ff5533" : "#6a3a12";
-  ctx.font = "36px \"IBM Plex Mono\", ui-monospace, monospace";
-  ctx.fillText(s.drop > 0 ? `drop −${s.drop}` : "pass through", w / 2, 300);
+  // drop line
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = s.drop > 0 ? "#ff6644" : "#8a5a1e";
+  ctx.font = "bold 42px \"IBM Plex Mono\", ui-monospace, monospace";
+  ctx.fillText(s.drop > 0 ? `DROP −${s.drop}` : "PASS", w / 2, 330);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -97,61 +101,60 @@ export function PipelineScene({
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x060301, 0.022);
+    scene.fog = new THREE.FogExp2(0x060301, 0.03);
 
-    const camera = new THREE.PerspectiveCamera(40, 2, 0.1, 100);
-    camera.position.set(0, 5.2, 14);
-    camera.lookAt(0, 0.4, 0);
+    // closer / lower FOV so blocks dominate the frame
+    const camera = new THREE.PerspectiveCamera(32, 2, 0.1, 80);
+    camera.position.set(0, 3.6, 11.2);
+    camera.lookAt(0, 0.5, 0);
 
-    scene.add(new THREE.AmbientLight(0xff9a1a, 0.65));
-    const key = new THREE.PointLight(0xffc266, 2.8, 60);
-    key.position.set(0, 8, 8);
+    scene.add(new THREE.AmbientLight(0xff9a1a, 0.75));
+    const key = new THREE.PointLight(0xffc266, 3.2, 55);
+    key.position.set(0, 6, 7);
     scene.add(key);
-    const fill = new THREE.PointLight(0xff6a1a, 0.7, 40);
-    fill.position.set(-8, 3, 4);
-    scene.add(fill);
 
-    const grid = new THREE.GridHelper(48, 48, 0x8a4a12, 0x2a1808);
-    grid.position.y = -1.8;
+    const grid = new THREE.GridHelper(40, 40, 0x8a4a12, 0x2a1808);
+    grid.position.y = -1.4;
     const gm = grid.material as THREE.Material | THREE.Material[];
     if (Array.isArray(gm)) {
       gm.forEach((m) => {
         m.transparent = true;
-        m.opacity = 0.5;
+        m.opacity = 0.4;
       });
     } else {
       gm.transparent = true;
-      gm.opacity = 0.5;
+      gm.opacity = 0.4;
     }
     scene.add(grid);
 
-    const spacing = 2.75;
+    // tighter spacing, larger boxes
+    const spacing = 2.35;
     const x0 = -((N - 1) * spacing) / 2;
 
     const busPts = [
-      new THREE.Vector3(x0 - 1.2, 0, 0),
+      new THREE.Vector3(x0 - 1.0, 0, 0),
       ...Array.from(
         { length: N },
         (_, i) => new THREE.Vector3(x0 + i * spacing, 0, 0)
       ),
-      new THREE.Vector3(x0 + (N - 1) * spacing + 1.2, 0, 0),
+      new THREE.Vector3(x0 + (N - 1) * spacing + 1.0, 0, 0),
     ];
     const busCurve = new THREE.CatmullRomCurve3(busPts);
-    const busGeo = new THREE.TubeGeometry(busCurve, 96, 0.045, 8, false);
+    const busGeo = new THREE.TubeGeometry(busCurve, 96, 0.05, 8, false);
     const busMat = new THREE.MeshBasicMaterial({
       color: 0xff9f1a,
       transparent: true,
-      opacity: 0.45,
+      opacity: 0.5,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     scene.add(new THREE.Mesh(busGeo, busMat));
 
-    // larger labeled blocks
     const nodes: THREE.Mesh[] = [];
     const materials: THREE.MeshStandardMaterial[] = [];
     const textures: THREE.CanvasTexture[] = [];
-    const boxGeo = new THREE.BoxGeometry(1.7, 1.35, 0.65);
+    // ~30% larger face area than prior
+    const boxGeo = new THREE.BoxGeometry(2.05, 1.7, 0.7);
 
     for (let i = 0; i < N; i++) {
       const sv = stagesRef.current[i] ?? DEFAULT_STAGES[i]!;
@@ -160,32 +163,31 @@ export function PipelineScene({
       const mat = new THREE.MeshStandardMaterial({
         map: tex,
         emissive: 0xff8c1a,
-        emissiveIntensity: 0.2,
+        emissiveIntensity: 0.25,
         emissiveMap: tex,
-        metalness: 0.4,
-        roughness: 0.4,
+        metalness: 0.35,
+        roughness: 0.42,
       });
       materials.push(mat);
       const mesh = new THREE.Mesh(boxGeo, mat);
-      mesh.position.set(x0 + i * spacing, 0.35, 0);
+      mesh.position.set(x0 + i * spacing, 0.55, 0);
       scene.add(mesh);
       nodes.push(mesh);
     }
 
-    // dense unidirectional packets
-    const PKT = 140;
+    const PKT = 120;
     const pktPos = new Float32Array(PKT * 3);
     const pktU = new Float32Array(PKT);
     const pktSp = new Float32Array(PKT);
     for (let i = 0; i < PKT; i++) {
       pktU[i] = Math.random();
-      pktSp[i] = 0.08 + Math.random() * 0.14;
+      pktSp[i] = 0.08 + Math.random() * 0.12;
     }
     const pktGeo = new THREE.BufferGeometry();
     pktGeo.setAttribute("position", new THREE.BufferAttribute(pktPos, 3));
     const pktMat = new THREE.PointsMaterial({
       color: 0xffe0a0,
-      size: 0.13,
+      size: 0.14,
       transparent: true,
       opacity: 0.9,
       depthWrite: false,
@@ -194,13 +196,12 @@ export function PipelineScene({
     });
     scene.add(new THREE.Points(pktGeo, pktMat));
 
-    // ambient dust
-    const DUST = 220;
+    const DUST = 160;
     const dustPos = new Float32Array(DUST * 3);
     for (let i = 0; i < DUST; i++) {
-      dustPos[i * 3] = (Math.random() - 0.5) * 30;
-      dustPos[i * 3 + 1] = Math.random() * 5 - 1;
-      dustPos[i * 3 + 2] = (Math.random() - 0.5) * 12;
+      dustPos[i * 3] = (Math.random() - 0.5) * 28;
+      dustPos[i * 3 + 1] = Math.random() * 4 - 0.8;
+      dustPos[i * 3 + 2] = (Math.random() - 0.5) * 10;
     }
     const dustGeo = new THREE.BufferGeometry();
     dustGeo.setAttribute("position", new THREE.BufferAttribute(dustPos, 3));
@@ -211,17 +212,16 @@ export function PipelineScene({
           color: 0xc47a22,
           size: 0.04,
           transparent: true,
-          opacity: 0.4,
+          opacity: 0.35,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
         })
       )
     );
 
-    // expanding pulse rings on journal hit (flat on ground, not halo on boxes)
     const pulseRings: THREE.Mesh[] = [];
     for (let k = 0; k < 3; k++) {
-      const g = new THREE.RingGeometry(0.2, 0.28, 48);
+      const g = new THREE.RingGeometry(0.25, 0.35, 48);
       const m = new THREE.MeshBasicMaterial({
         color: 0xffb000,
         transparent: true,
@@ -232,7 +232,7 @@ export function PipelineScene({
       });
       const mesh = new THREE.Mesh(g, m);
       mesh.rotation.x = -Math.PI / 2;
-      mesh.position.y = -1.7;
+      mesh.position.y = -1.35;
       scene.add(mesh);
       pulseRings.push(mesh);
     }
@@ -260,7 +260,7 @@ export function PipelineScene({
 
     const resize = () => {
       const w = mount.clientWidth || 1000;
-      const h = mount.clientHeight || 320;
+      const h = mount.clientHeight || 340;
       renderer.setSize(w, h, false);
       camera.aspect = w / Math.max(h, 1);
       camera.updateProjectionMatrix();
@@ -292,11 +292,10 @@ export function PipelineScene({
         refreshTextures(active);
       }
 
-      // cinematic camera
-      camera.position.x = Math.sin(t * 0.11) * 0.55;
-      camera.position.y = 5.0 + Math.sin(t * 0.08) * 0.2;
-      camera.position.z = 13.5 + Math.cos(t * 0.07) * 0.4;
-      camera.lookAt(0, 0.35, 0);
+      camera.position.x = Math.sin(t * 0.1) * 0.35;
+      camera.position.y = 3.5 + Math.sin(t * 0.08) * 0.12;
+      camera.position.z = 11.0 + Math.cos(t * 0.07) * 0.25;
+      camera.lookAt(0, 0.55, 0);
 
       for (let i = 0; i < N; i++) {
         const mesh = nodes[i]!;
@@ -305,40 +304,30 @@ export function PipelineScene({
         const isCur = i === active;
 
         mat.emissiveIntensity = isCur
-          ? 0.7 + burst * 0.55
+          ? 0.75 + burst * 0.5
           : isOn
-            ? 0.35
-            : 0.14;
+            ? 0.4
+            : 0.18;
 
-        const bob = Math.sin(t * 1.7 + i * 0.7) * 0.08;
-        const lift = isCur ? 0.55 : isOn ? 0.2 : 0.05;
-        mesh.position.y = 0.35 + lift + bob;
-        mesh.rotation.x = -0.15;
-        mesh.rotation.y = Math.sin(t * 0.25 + i * 0.12) * 0.06;
-        // subtle scale pulse on current
-        const sc = isCur ? 1.06 + burst * 0.06 : 1;
-        mesh.scale.setScalar(sc);
+        const bob = Math.sin(t * 1.6 + i * 0.65) * 0.07;
+        const lift = isCur ? 0.45 : isOn ? 0.15 : 0.05;
+        mesh.position.y = 0.55 + lift + bob;
+        mesh.rotation.x = -0.18; // face camera a bit more
+        mesh.rotation.y = Math.sin(t * 0.2 + i * 0.1) * 0.04;
+        mesh.scale.setScalar(isCur ? 1.08 + burst * 0.05 : 1);
       }
 
-      // packets to active stage only
       const maxU = Math.max(0.1, (active + 0.6) / N);
       const pos = pktGeo.attributes.position as THREE.BufferAttribute;
       for (let i = 0; i < PKT; i++) {
         let u = (pktU[i]! + t * pktSp[i]!) % 1;
         u = u * maxU;
         const pt = busCurve.getPointAt(Math.min(0.999, u));
-        pos.setXYZ(
-          i,
-          pt.x,
-          pt.y + Math.sin(t * 5 + i) * 0.05,
-          pt.z + Math.cos(t * 4 + i) * 0.03
-        );
+        pos.setXYZ(i, pt.x, pt.y + 0.08, pt.z);
       }
       pos.needsUpdate = true;
-      pktMat.opacity = 0.55 + inten * 0.3 + burst * 0.35;
-      pktMat.size = 0.11 + burst * 0.1;
+      pktMat.opacity = 0.55 + inten * 0.3 + burst * 0.3;
 
-      // ground pulse rings under active node
       const ax = x0 + active * spacing;
       for (let k = 0; k < pulseRings.length; k++) {
         const ring = pulseRings[k]!;
@@ -347,23 +336,23 @@ export function PipelineScene({
         if (rt < 0 || rt > 1.2) {
           mat.opacity = 0;
         } else {
-          const s = 0.5 + rt * 4;
+          const s = 0.6 + rt * 3.5;
           ring.scale.set(s, s, s);
           ring.position.x = ax;
-          mat.opacity = (1 - rt / 1.2) * 0.45;
+          mat.opacity = (1 - rt / 1.2) * 0.4;
         }
       }
 
       const dp = dustGeo.attributes.position as THREE.BufferAttribute;
       for (let i = 0; i < DUST; i++) {
-        let y = dp.getY(i) + 0.006;
-        if (y > 4) y = -1.2;
+        let y = dp.getY(i) + 0.005;
+        if (y > 3.5) y = -1;
         dp.setY(i, y);
       }
       dp.needsUpdate = true;
 
-      busMat.opacity = 0.3 + (active / N) * 0.35 + burst * 0.2;
-      key.intensity = 2.2 + burst * 1.8 + inten * 0.6;
+      busMat.opacity = 0.35 + (active / N) * 0.3 + burst * 0.15;
+      key.intensity = 2.6 + burst * 1.6 + inten * 0.5;
 
       renderer.render(scene, camera);
       raf = requestAnimationFrame(frame);
