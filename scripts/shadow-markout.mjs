@@ -1,23 +1,18 @@
 #!/usr/bin/env node
 /**
- * Shadow markout labeler for research production.
- *
- * Reads journals/*.jsonl, finds quote_accepted rows, re-quotes Base QuoterV2
- * for the same input→output, computes markout bps (Amount-safe integer math),
- * appends kind=markout records so the desk can show W/L.
- *
- * No keys. No broadcast. Not a live fill.
+ * Shadow markout labeler for research production (Phase 0.5).
  *
  * Usage:
  *   export BASE_RPC_URL=https://mainnet.base.org
  *   npm run shadow-markout
+ *   npm run shadow-markout -- --windows 30,120
  *   npm run shadow-markout -- --window 120 --dir journals
  */
 
 import { readdir, readFile, appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { toAmount } from "@cavalre/core";
-import { computeMarkoutBps, makeMarkoutAnnotation } from "@cavalre/journal";
+import { makeMarkoutAnnotation } from "@cavalre/journal";
 import {
   createUniswapV3ReferenceCost,
   DEFAULT_BASE_RPC,
@@ -31,7 +26,11 @@ function flag(name, fallback) {
 }
 
 const JOURNAL_DIR = flag("dir", "journals");
-const WINDOW_SEC = Number(flag("window", "120"));
+const windowsRaw = flag("windows", "") || flag("window", "120");
+const WINDOWS = windowsRaw
+  .split(",")
+  .map((s) => Number(s.trim()))
+  .filter((n) => Number.isFinite(n) && n > 0);
 const RPC = process.env.BASE_RPC_URL ?? DEFAULT_BASE_RPC;
 const referenceCostFn = createUniswapV3ReferenceCost({ rpcUrl: RPC });
 
@@ -98,7 +97,7 @@ function wireMarkout(seq, accept, annotation, markOut) {
   };
 }
 
-async function processFile(name) {
+async function processFile(name, windowSec) {
   const path = join(JOURNAL_DIR, name);
   const records = await loadAll(path);
   const accepts = records.filter((r) => r.kind === "quote_accepted" && r.ref);
@@ -106,15 +105,13 @@ async function processFile(name) {
   let nextSeq = records.reduce((m, r) => Math.max(m, r.seq ?? 0), 0) + 1;
 
   for (const acc of accepts) {
-    if (alreadyMarked(records, acc.ref, WINDOW_SEC)) continue;
+    if (alreadyMarked(records, acc.ref, windowSec)) continue;
 
     const resolvedIn = acc.context?.resolvedInput ?? acc.amount;
     const resolvedOut = acc.context?.resolvedOutput;
     const inputToken = acc.context?.inputToken;
     const outputToken = acc.context?.outputToken;
-    if (!resolvedIn || !resolvedOut || !inputToken || !outputToken) {
-      continue;
-    }
+    if (!resolvedIn || !resolvedOut || !inputToken || !outputToken) continue;
 
     let fillOut;
     let inputAmt;
@@ -125,14 +122,9 @@ async function processFile(name) {
       continue;
     }
 
-    const orderStub = {
-      inputToken,
-      outputToken,
-    };
-
     let markOut;
     try {
-      markOut = await referenceCostFn(orderStub, inputAmt);
+      markOut = await referenceCostFn({ inputToken, outputToken }, inputAmt);
     } catch (e) {
       console.error(
         JSON.stringify({
@@ -155,11 +147,10 @@ async function processFile(name) {
       continue;
     }
 
-    // fillPrice = output we would have delivered; markPrice = output AMM gives now for same input
     const annotation = makeMarkoutAnnotation({
       fillPrice: fillOut,
       markPrice: markOut,
-      windowSec: WINDOW_SEC,
+      windowSec,
       toxicThresholdBps: 30,
     });
 
@@ -174,7 +165,7 @@ async function processFile(name) {
         ref: acc.ref,
         markoutBps: annotation.markoutBps,
         toxic: annotation.toxic,
-        windowSec: WINDOW_SEC,
+        windowSec,
       })
     );
   }
@@ -194,19 +185,23 @@ if (files.length === 0) {
   process.exit(0);
 }
 
+if (WINDOWS.length === 0) WINDOWS.push(120);
+
 console.error(
   JSON.stringify({
     level: "info",
     message: "shadow-markout start",
     rpc: RPC,
-    windowSec: WINDOW_SEC,
+    windows: WINDOWS,
     files: files.length,
   })
 );
 
 let total = 0;
-for (const f of files) {
-  total += await processFile(f);
+for (const w of WINDOWS) {
+  for (const f of files) {
+    total += await processFile(f, w);
+  }
 }
 
 console.error(
@@ -214,5 +209,6 @@ console.error(
     level: "info",
     message: "shadow-markout done",
     labeled: total,
+    windows: WINDOWS,
   })
 );
