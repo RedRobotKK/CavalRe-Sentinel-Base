@@ -132,7 +132,6 @@ button:hover {
 }
 .hud-clock { color: var(--phosphor); }
 
-/* Balanced centered grid */
 .desk-grid {
   display: grid;
   grid-template-columns: 1fr 260px;
@@ -158,7 +157,6 @@ button:hover {
   overflow: hidden;
 }
 
-/* Pipeline (from prior) */
 .pipe { padding: 10px 12px 12px; }
 .pipe-head {
   display: flex;
@@ -197,6 +195,32 @@ button:hover {
 .pipe-kpis .wait { color: var(--warn); }
 .pipe-kpis .bad { color: var(--bad); }
 
+.pass-banner {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(255, 176, 0, 0.35);
+  background: rgba(255, 176, 0, 0.06);
+}
+.pass-banner-label {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pass-banner-n {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--phosphor);
+}
+.pass-banner-sub {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 .pipe-stages {
   display: flex;
   flex-wrap: wrap;
@@ -210,14 +234,17 @@ button:hover {
   align-items: center;
 }
 .pipe-stage {
-  min-width: 64px;
+  min-width: 68px;
   padding: 8px 10px;
   border: 1px solid var(--border);
   background: #0c0703;
   text-align: center;
 }
-.pipe-stage.active { border-color: #8a4a12; }
-.pipe-stage.has-drop { border-color: rgba(255, 80, 40, 0.45); }
+.pipe-stage.active {
+  border-color: rgba(255, 176, 0, 0.45);
+  box-shadow: inset 0 0 12px rgba(255, 176, 0, 0.06);
+}
+.pipe-stage.has-drop { border-bottom-color: rgba(255, 80, 40, 0.55); }
 .pipe-stage-name {
   font-size: 9px;
   letter-spacing: 0.1em;
@@ -229,13 +256,17 @@ button:hover {
   color: var(--phosphor);
   font-weight: 600;
 }
-.pipe-stage-drop {
-  font-size: 10px;
-  color: var(--bad);
-  margin-top: 2px;
-  min-height: 14px;
+.pipe-stage-n.pass { color: var(--phosphor); }
+.pipe-stage-meta {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-size: 9px;
 }
-.pipe-stage-drop.muted { color: var(--muted); opacity: 0.5; }
+.pass-lbl { color: var(--muted); }
+.drop-lbl { color: var(--bad); }
+.drop-lbl.muted { opacity: 0.4; }
 .pipe-arrow {
   color: var(--muted);
   padding: 0 4px;
@@ -304,6 +335,8 @@ button:hover {
   padding: 5px 8px;
   border-bottom: 1px solid rgba(92, 51, 16, 0.35);
 }
+.pipe-table tr.accept td { background: rgba(255, 200, 80, 0.07); }
+.pipe-table tr.wait td { background: rgba(255, 170, 50, 0.05); }
 .pipe-table .mono { color: var(--text-dim); }
 .pipe-table .reason {
   max-width: 220px;
@@ -323,7 +356,6 @@ button:hover {
 .tag.reject { color: var(--bad); border-color: #802010; }
 .tag.wait { color: var(--warn); border-color: #a06020; }
 
-/* Stream layer */
 .stream-layer {
   border: 1px solid var(--border);
   background: var(--panel);
@@ -378,7 +410,7 @@ button:hover {
   border: 1px solid var(--border);
   background: #0c0703;
   padding: 8px;
-  min-height: 150px;
+  min-height: 160px;
 }
 .chart-title {
   font-size: 9px;
@@ -392,7 +424,6 @@ button:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 16px;
-  padding-top: 4px;
   font-size: 10px;
   color: var(--text-dim);
 }
