@@ -76,12 +76,10 @@ start_one() {
 
 : > run/stack.pids
 
-start_one dry-run   npx tsx scripts/dry-run-harness.mjs
-start_one desk-api  node scripts/desk-api.mjs
-# Use npx vite directly so the process stays alive (npm can exit early in some setups)
-start_one desk-web  npx vite --host 127.0.0.1 --port 5173 --config apps/desk/vite.config.ts
+start_one dry-run  npx tsx scripts/dry-run-harness.mjs
+start_one desk-api node scripts/desk-api.mjs
+start_one desk-web bash -c 'cd apps/desk && npx vite --host 127.0.0.1 --port 5173'
 
-# Brief startup grace — surface immediate failures
 sleep 1.5
 for i in "${!PIDS[@]}"; do
   pid="${PIDS[$i]}"
