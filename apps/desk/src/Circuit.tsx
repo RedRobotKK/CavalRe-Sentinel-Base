@@ -154,7 +154,6 @@ function build(records: any[]) {
   };
 }
 
-/** Precomputed binary columns for the chain field */
 function makeBinaryField(cols = 48, rows = 10) {
   const field: string[][] = [];
   for (let c = 0; c < cols; c++) {
@@ -177,8 +176,7 @@ export function Circuit({
   const m = useMemo(() => build(records), [records]);
   const logRef = useRef<HTMLDivElement>(null);
   const prevLen = useRef(0);
-  const [litIdx, setLitIdx] = useState(0);
-  const binary = useMemo(() => makeBinaryField(), []);
+  const [wave, setWave] = useState(0); // 0..lastHit only, one-shot
 
   useEffect(() => {
     if (!logRef.current) return;
@@ -186,18 +184,20 @@ export function Circuit({
     prevLen.current = m.log.length;
   }, [m.log.length, pulseKey]);
 
-  // Signal travels stage-by-stage
+  // One-shot wave from POLL → lastHit (no bounce back)
   useEffect(() => {
     const end = Math.max(0, PATH.indexOf(m.lastHit));
     let i = 0;
-    setLitIdx(0);
+    setWave(0);
     const step = window.setInterval(() => {
-      i += 1;
-      if (i > Math.max(end, PATH.length - 1)) {
-        i = 0;
+      if (i >= end) {
+        window.clearInterval(step);
+        setWave(end);
+        return;
       }
-      setLitIdx(i > end && end > 0 ? Math.min(i, end) : i % PATH.length);
-    }, 280);
+      i += 1;
+      setWave(i);
+    }, 160);
     return () => window.clearInterval(step);
   }, [pulseKey, m.lastHit]);
 
@@ -212,6 +212,8 @@ export function Circuit({
       </div>
     );
   }
+
+  const hitIdx = Math.max(0, PATH.indexOf(m.lastHit));
 
   return (
     <div className="pipe panel-rise">
@@ -250,10 +252,9 @@ export function Circuit({
         </span>
       </div>
 
-      {/* Flying blocks over binary chain */}
       <div className="chain-stage">
         <div className="binary-field" aria-hidden>
-          {binary.map((col, ci) => (
+          {makeBinaryField().map((col, ci) => (
             <div
               key={ci}
               className="binary-col"
@@ -273,15 +274,11 @@ export function Circuit({
 
         <div className="fly-track">
           <div className="fly-thread" />
-          <div
-            className="fly-packet"
-            style={{ left: `${(litIdx / Math.max(1, PATH.length - 1)) * 100}%` }}
-          />
 
           {m.funnel.map((s, i) => {
-            const on = litIdx >= i;
-            const current = litIdx === i;
-            const passed = litIdx > i;
+            const on = i <= wave;
+            const current = i === wave;
+            const terminal = i === hitIdx;
             return (
               <div
                 key={s.id}
@@ -289,7 +286,7 @@ export function Circuit({
                   "fly-block" +
                   (on ? " on" : "") +
                   (current ? " current" : "") +
-                  (passed ? " passed" : "") +
+                  (terminal && wave >= hitIdx ? " terminal" : "") +
                   (s.drop > 0 ? " has-drop" : "")
                 }
                 style={{ animationDelay: `${i * 0.08}s` }}
@@ -305,7 +302,7 @@ export function Circuit({
                   </div>
                 </div>
                 {i < m.funnel.length - 1 && (
-                  <div className={`fly-link${litIdx > i ? " hot" : ""}`} />
+                  <div className={`fly-link${wave > i ? " hot" : ""}`} />
                 )}
               </div>
             );
