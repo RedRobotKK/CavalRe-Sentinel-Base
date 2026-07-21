@@ -1,4 +1,4 @@
-/* Hero 3D pipeline + metric chips below */
+/* 3D labeled blocks — full real-estate, no HTML chip row */
 
 .chain-stage {
   position: relative;
@@ -13,8 +13,6 @@
 
 .chain-stage-3d {
   min-height: 280px;
-  display: flex;
-  flex-direction: column;
 }
 
 .pipeline-scene {
@@ -23,99 +21,9 @@
   z-index: 0;
   pointer-events: none;
 }
+
 .pipeline-scene-canvas {
   width: 100% !important;
   height: 100% !important;
   display: block;
-}
-
-/* chips anchored to bottom of the 3d viewport */
-.fly-track-overlay {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 6px;
-  margin-top: auto;
-  padding: 0 12px 12px;
-  min-height: 280px;
-  pointer-events: none;
-}
-
-.fly-block {
-  flex: 1 1 0;
-  max-width: 110px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-}
-
-.fly-block-core {
-  width: 100%;
-  padding: 7px 4px 6px;
-  text-align: center;
-  border: 1px solid rgba(92, 51, 16, 0.7);
-  background: rgba(6, 3, 1, 0.78);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
-  transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s;
-}
-
-.fly-block.on .fly-block-core {
-  border-color: rgba(255, 160, 40, 0.55);
-  box-shadow: 0 0 16px rgba(255, 160, 40, 0.22);
-}
-
-.fly-block.current .fly-block-core {
-  border-color: #ffc266;
-  transform: translateY(-3px);
-  box-shadow: 0 0 24px rgba(255, 176, 0, 0.4);
-  background: rgba(20, 10, 4, 0.88);
-}
-
-.fly-block.has-drop .fly-block-core {
-  border-bottom: 2px solid rgba(255, 80, 40, 0.7);
-}
-
-.fly-label {
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  color: #8a5a1e;
-}
-.fly-block.on .fly-label,
-.fly-block.current .fly-label {
-  color: #ffb000;
-  text-shadow: 0 0 8px rgba(255, 176, 0, 0.4);
-}
-
-.fly-n {
-  font-size: 15px;
-  font-weight: 700;
-  color: #ffb000;
-  margin-top: 2px;
-}
-
-.fly-meta {
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  margin-top: 2px;
-  font-size: 9px;
-  color: #8a5a1e;
-}
-.fly-meta .drop { color: #ff5533; }
-.fly-meta .dim { opacity: 0.4; }
-
-@media (max-width: 900px) {
-  .chain-stage-3d,
-  .fly-track-overlay {
-    min-height: 200px;
-  }
-  .fly-track-overlay {
-    flex-wrap: wrap;
-  }
-  .fly-block {
-    max-width: 30%;
-  }
 }

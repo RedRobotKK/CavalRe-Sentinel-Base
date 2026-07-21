@@ -134,7 +134,7 @@ function build(records: any[]) {
   const log = [...signals].reverse().slice(0, 40);
 
   const funnel = STAGES.map((s) => ({
-    ...s,
+    label: s.label,
     pass: pass[s.id],
     drop: drop[s.id],
   }));
@@ -244,36 +244,8 @@ export function Circuit({
           pulseKey={pulseKey}
           activeStage={activeStage}
           intensity={Math.min(1, 0.4 + m.seen / 40)}
+          stages={m.funnel}
         />
-
-        <div className="fly-track fly-track-overlay">
-          {m.funnel.map((s, i) => {
-            const on = i <= wave;
-            const current = i === wave;
-            return (
-              <div
-                key={s.id}
-                className={
-                  "fly-block" +
-                  (on ? " on" : "") +
-                  (current ? " current" : "") +
-                  (s.drop > 0 ? " has-drop" : "")
-                }
-              >
-                <div className="fly-block-core">
-                  <div className="fly-label">{s.label}</div>
-                  <div className="fly-n">{s.pass}</div>
-                  <div className="fly-meta">
-                    <span>pass</span>
-                    <span className={s.drop > 0 ? "drop" : "dim"}>
-                      {s.drop > 0 ? `−${s.drop}` : "−0"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
       </div>
 
       <div className="pipe-outcomes">
