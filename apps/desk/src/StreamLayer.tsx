@@ -24,13 +24,10 @@ type Rec = {
 
 const AMBER = "#ffb000";
 const BAD = "#ff5533";
+const OK = "#ffcc66";
 const MUTED = "#8a5a1e";
 const GRID = "#3a2008";
 
-/**
- * Stream-processing style windows over the open VIEW channel.
- * Aggregates intents / latency / reject rate — not raw spam.
- */
 export function StreamLayer({ records }: { records: Rec[] }) {
   const model = useMemo(() => windowed(records), [records]);
 
@@ -39,43 +36,50 @@ export function StreamLayer({ records }: { records: Rec[] }) {
       <div className="stream-layer-head">
         <h2>Stream · open channel</h2>
         <span className="muted">
-          windowed aggregates · {model.windows.length} cycles
+          {model.windows.length} cycles · pass-through emphasized
         </span>
       </div>
 
       <div className="stream-kpis">
         <Kpi label="latency p50" value={fmtMs(model.latP50)} />
         <Kpi label="latency p95" value={fmtMs(model.latP95)} />
-        <Kpi label="reject rate" value={fmtPct(model.rejectRate)} alert={model.rejectRate > 0.8} />
-        <Kpi label="intents / win" value={String(model.avgRaw)} />
-        <Kpi label="unique refs" value={String(model.uniqueRefs)} />
+        <Kpi label="pass rate" value={fmtPct(model.passRate)} />
+        <Kpi
+          label="reject rate"
+          value={fmtPct(model.rejectRate)}
+          alert={model.rejectRate > 0.85}
+        />
+        <Kpi label="signals thru" value={String(model.signalsThru)} />
       </div>
 
       <div className="stream-charts">
         <div className="stream-chart">
-          <div className="chart-title">Rejection rate (per cycle)</div>
-          <ResponsiveContainer width="100%" height={120}>
+          <div className="chart-title">Pass vs reject (per cycle)</div>
+          <ResponsiveContainer width="100%" height={130}>
             <AreaChart data={model.windows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid stroke={GRID} strokeDasharray="3 3" />
               <XAxis dataKey="t" stroke={MUTED} fontSize={9} tick={{ fill: MUTED }} />
-              <YAxis
-                stroke={MUTED}
-                fontSize={9}
-                domain={[0, 1]}
-                tickFormatter={(v) => `${Math.round(v * 100)}%`}
-                width={36}
-              />
-              <Tooltip
-                contentStyle={tooltipStyle}
-                formatter={(v: number) => [`${(v * 100).toFixed(0)}%`, "reject rate"]}
+              <YAxis stroke={MUTED} fontSize={9} width={28} allowDecimals={false} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Area
+                type="monotone"
+                dataKey="passed"
+                stackId="1"
+                stroke={OK}
+                fill="rgba(255,204,102,0.35)"
+                strokeWidth={1.5}
+                isAnimationActive={false}
+                name="pass"
               />
               <Area
                 type="monotone"
-                dataKey="rejectRate"
+                dataKey="rejected"
+                stackId="1"
                 stroke={BAD}
-                fill="rgba(255,85,51,0.2)"
+                fill="rgba(255,85,51,0.25)"
                 strokeWidth={1.5}
                 isAnimationActive={false}
+                name="reject"
               />
             </AreaChart>
           </ResponsiveContainer>
@@ -83,7 +87,7 @@ export function StreamLayer({ records }: { records: Rec[] }) {
 
         <div className="stream-chart">
           <div className="chart-title">Cycle latency (ms)</div>
-          <ResponsiveContainer width="100%" height={120}>
+          <ResponsiveContainer width="100%" height={130}>
             <LineChart data={model.windows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid stroke={GRID} strokeDasharray="3 3" />
               <XAxis dataKey="t" stroke={MUTED} fontSize={9} tick={{ fill: MUTED }} />
@@ -102,8 +106,8 @@ export function StreamLayer({ records }: { records: Rec[] }) {
         </div>
 
         <div className="stream-chart">
-          <div className="chart-title">Drop reasons (window)</div>
-          <ResponsiveContainer width="100%" height={120}>
+          <div className="chart-title">Drop reasons</div>
+          <ResponsiveContainer width="100%" height={130}>
             <BarChart
               data={model.topDrops}
               layout="vertical"
@@ -120,9 +124,9 @@ export function StreamLayer({ records }: { records: Rec[] }) {
                 tick={{ fill: MUTED }}
               />
               <Tooltip contentStyle={tooltipStyle} />
-              <Bar dataKey="n" fill={BAD} radius={[0, 2, 2, 0]} isAnimationActive={false}>
+              <Bar dataKey="n" radius={[0, 2, 2, 0]} isAnimationActive={false}>
                 {model.topDrops.map((_, i) => (
-                  <Cell key={i} fill={i === 0 ? BAD : "rgba(255,85,51,0.55)"} />
+                  <Cell key={i} fill={i === 0 ? BAD : "rgba(255,85,51,0.5)"} />
                 ))}
               </Bar>
             </BarChart>
@@ -135,16 +139,13 @@ export function StreamLayer({ records }: { records: Rec[] }) {
           <em>wire</em> UniswapX Dutch_V3
         </span>
         <span>
+          <em>pass</em> accept + wait
+        </span>
+        <span>
           <em>ref</em> QuoterV2
         </span>
         <span>
           <em>amount</em> bigint
-        </span>
-        <span>
-          <em>policy</em> accept|wait|reject
-        </span>
-        <span>
-          <em>risk</em> hard gates
         </span>
         <span>
           <em>mode</em> VIEW
@@ -192,15 +193,16 @@ function windowed(records: Rec[]) {
   const windows: {
     t: string;
     rejectRate: number;
+    passRate: number;
     latencyMs: number;
     raw: number;
     rejected: number;
-    accepted: number;
+    passed: number;
   }[] = [];
 
   const dropMap = new Map<string, number>();
-  const refs = new Set<string>();
   const latencies: number[] = [];
+  let signalsThru = 0;
 
   for (const r of records) {
     if (r.reason === "cycle_heartbeat") {
@@ -208,23 +210,26 @@ function windowed(records: Rec[]) {
       const rejected = Number(r.context?.rejected ?? 0);
       const accepted = Number(r.context?.accepted ?? 0);
       const waited = Number(r.context?.waited ?? 0);
-      const decided = rejected + accepted + waited;
+      const passed = accepted + waited;
+      const decided = rejected + passed;
       const latencyMs = Number(r.context?.latencyMs ?? NaN);
       if (Number.isFinite(latencyMs)) latencies.push(latencyMs);
       windows.push({
         t: r.ts?.slice(11, 19) ?? "",
-        rejectRate: decided > 0 ? rejected / decided : raw > 0 ? 1 : 0,
+        rejectRate: decided > 0 ? rejected / decided : 0,
+        passRate: decided > 0 ? passed / decided : 0,
         latencyMs: Number.isFinite(latencyMs) ? latencyMs : 0,
         raw,
         rejected,
-        accepted,
+        passed,
       });
       continue;
     }
-    if (r.ref) refs.add(String(r.ref));
+    if (r.kind === "quote_accepted" || r.context?.policyAction === "wait") {
+      signalsThru += 1;
+    }
     if (r.kind === "quote_rejected") {
       let name = (r.reason ?? "reject").slice(0, 28);
-      // normalize class rejects
       if (name.startsWith("class_not_tradable:")) {
         name = "class:" + name.split(":")[1];
       }
@@ -240,15 +245,10 @@ function windowed(records: Rec[]) {
     sortedLat.length > 0 ? sortedLat[Math.floor(sortedLat.length * 0.95)]! : null;
 
   const recentReject = last.reduce((s, w) => s + w.rejected, 0);
-  const recentDecided = last.reduce(
-    (s, w) => s + w.rejected + w.accepted,
-    0
-  );
+  const recentPass = last.reduce((s, w) => s + w.passed, 0);
+  const recentDecided = recentReject + recentPass;
   const rejectRate = recentDecided > 0 ? recentReject / recentDecided : 0;
-  const avgRaw =
-    last.length > 0
-      ? (last.reduce((s, w) => s + w.raw, 0) / last.length).toFixed(1)
-      : "0";
+  const passRate = recentDecided > 0 ? recentPass / recentDecided : 0;
 
   const topDrops = [...dropMap.entries()]
     .map(([name, n]) => ({ name, n }))
@@ -260,8 +260,8 @@ function windowed(records: Rec[]) {
     latP50,
     latP95,
     rejectRate,
-    avgRaw,
-    uniqueRefs: refs.size,
+    passRate,
+    signalsThru: signalsThru || recentPass,
     topDrops,
   };
 }

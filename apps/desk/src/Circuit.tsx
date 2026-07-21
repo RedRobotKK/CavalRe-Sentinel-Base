@@ -21,6 +21,8 @@ const STAGES: { id: StageId; label: string }[] = [
   { id: "book", label: "BOOK" },
 ];
 
+const PATH = STAGES.map((s) => s.id);
+
 type IntentRow = {
   ref: string;
   action: "accept" | "reject" | "wait";
@@ -46,11 +48,12 @@ function stageFrom(r: any): StageId {
   if (reason.includes("toxicity") || reason.startsWith("risk")) return "risk";
   if (reason.includes("decay")) return "decay";
   if (r?.kind === "quote_accepted") return "book";
+  if (r?.kind === "info" && r?.context?.policyAction === "wait") return "policy";
   return "parse";
 }
 
 function build(records: any[]) {
-  const drops: Record<StageId, number> = {
+  const drop: Record<StageId, number> = {
     poll: 0,
     parse: 0,
     classify: 0,
@@ -60,19 +63,22 @@ function build(records: any[]) {
     policy: 0,
     book: 0,
   };
+  const pass: Record<StageId, number> = { ...drop };
+
   let heartbeats = 0;
   let lastRaw = 0;
   let accept = 0;
   let wait = 0;
   let reject = 0;
 
-  // latest record per intent ref
   const byRef = new Map<string, IntentRow>();
 
   for (const r of records) {
     if (r.reason === "cycle_heartbeat") {
       heartbeats += 1;
       lastRaw = Number(r.context?.raw ?? lastRaw);
+      // poll always "passes" as listen signal
+      pass.poll += 1;
       continue;
     }
 
@@ -89,11 +95,21 @@ function build(records: any[]) {
     else reject += 1;
 
     const st = stageFrom(r);
-    if (action === "reject") drops[st] += 1;
+    const idx = PATH.indexOf(st);
+
+    if (action === "reject") {
+      drop[st] += 1;
+      // passed every stage before drop
+      for (let i = 0; i < idx; i++) pass[PATH[i]] += 1;
+    } else {
+      // accept or wait: passed full path through policy
+      const end = action === "accept" ? PATH.length : PATH.indexOf("policy") + 1;
+      for (let i = 0; i < end; i++) pass[PATH[i]] += 1;
+      if (action === "accept") pass.book += 1;
+    }
 
     const ref = String(r.ref ?? "");
     if (!ref) continue;
-
     byRef.set(ref, {
       ref: ref.slice(0, 14),
       action,
@@ -112,26 +128,22 @@ function build(records: any[]) {
     });
   }
 
-  const intents = [...byRef.values()].slice(-12).reverse();
-  const seen = accept + wait + reject;
+  const allIntents = [...byRef.values()];
+  // passes first (accept/wait), then rejects
+  const intents = [
+    ...allIntents.filter((i) => i.action !== "reject"),
+    ...allIntents.filter((i) => i.action === "reject"),
+  ].slice(0, 16);
 
-  // funnel: surviving estimate
-  const funnel = STAGES.map((s, i) => {
-    const droppedHere = drops[s.id];
-    let thru = seen;
-    for (let j = 0; j < i; j++) {
-      // rough: subtract prior drops from seen
-    }
-    // cumulative drop before this stage
-    let lost = 0;
-    for (let j = 0; j < i; j++) lost += drops[STAGES[j].id];
-    thru = Math.max(0, seen - lost);
-    return {
-      ...s,
-      thru: s.id === "poll" ? Math.max(seen, lastRaw, heartbeats) : thru,
-      drop: droppedHere,
-    };
-  });
+  const seen = accept + wait + reject;
+  const signalsThrough = accept + wait; // non-terminal-reject outcomes
+
+  const funnel = STAGES.map((s) => ({
+    ...s,
+    pass: pass[s.id],
+    drop: drop[s.id],
+    thru: pass[s.id] + drop[s.id],
+  }));
 
   return {
     heartbeats,
@@ -140,6 +152,7 @@ function build(records: any[]) {
     wait,
     reject,
     seen,
+    signalsThrough,
     funnel,
     intents,
     live: records.length > 0,
@@ -160,11 +173,9 @@ export function Circuit({
       <div className="pipe panel-rise">
         <div className="pipe-head">
           <h2>Pipeline</h2>
-          <span className="pipe-hint">waiting for VIEW journals or simulate…</span>
+          <span className="pipe-hint">open channel idle — start VIEW harness</span>
         </div>
-        <div className="pipe-empty">
-          No intent decisions yet. Dry-run polls UniswapX; simulate injects synthetic Dutch flow.
-        </div>
+        <div className="pipe-empty">Listening… no journal signals yet.</div>
       </div>
     );
   }
@@ -175,7 +186,10 @@ export function Circuit({
         <h2>Pipeline</h2>
         <div className="pipe-kpis">
           <span>
-            <em>intents</em> {m.seen}
+            <em>seen</em> {m.seen}
+          </span>
+          <span className="ok">
+            <em>through</em> {m.signalsThrough}
           </span>
           <span>
             <em>raw</em> {m.lastRaw}
@@ -195,27 +209,37 @@ export function Circuit({
         </div>
       </div>
 
-      {/* Stage funnel — clean horizontal */}
+      {/* pass-through emphasis */}
+      <div className="pass-banner">
+        <span className="pass-banner-label">signals through policy</span>
+        <span className="pass-banner-n">{m.signalsThrough}</span>
+        <span className="pass-banner-sub">
+          accept {m.accept} · wait {m.wait} · dropped {m.reject}
+        </span>
+      </div>
+
       <div className="pipe-stages">
         {m.funnel.map((s, i) => (
           <div key={s.id} className="pipe-stage-wrap">
             <div
-              className={`pipe-stage${s.drop > 0 ? " has-drop" : ""}${s.thru > 0 ? " active" : ""}`}
+              className={`pipe-stage${s.pass > 0 ? " active" : ""}${s.drop > 0 ? " has-drop" : ""}`}
             >
               <div className="pipe-stage-name">{s.label}</div>
-              <div className="pipe-stage-n">{s.thru}</div>
-              {s.drop > 0 ? (
-                <div className="pipe-stage-drop">−{s.drop}</div>
-              ) : (
-                <div className="pipe-stage-drop muted">—</div>
-              )}
+              <div className="pipe-stage-n pass">{s.pass}</div>
+              <div className="pipe-stage-meta">
+                <span className="pass-lbl">pass</span>
+                {s.drop > 0 ? (
+                  <span className="drop-lbl">−{s.drop}</span>
+                ) : (
+                  <span className="drop-lbl muted">−0</span>
+                )}
+              </div>
             </div>
             {i < m.funnel.length - 1 && <div className="pipe-arrow">→</div>}
           </div>
         ))}
       </div>
 
-      {/* Outcomes */}
       <div className="pipe-outcomes">
         <div className="out ok">
           <span>ACCEPT</span>
@@ -231,11 +255,10 @@ export function Circuit({
         </div>
       </div>
 
-      {/* Unique intents table */}
       <div className="pipe-table-wrap">
         <div className="pipe-table-head">
-          <span>Intents</span>
-          <span className="muted">{m.intents.length} unique refs</span>
+          <span>Intent signals</span>
+          <span className="muted">pass rows first · {m.intents.length} shown</span>
         </div>
         <table className="pipe-table">
           <thead>
@@ -244,14 +267,14 @@ export function Circuit({
               <th>ref</th>
               <th>class</th>
               <th>stage</th>
-              <th>action</th>
+              <th>signal</th>
               <th>edge</th>
               <th>reason</th>
             </tr>
           </thead>
           <tbody>
             {m.intents.map((it) => (
-              <tr key={it.ref + it.ts} className={it.action}>
+              <tr key={it.ref + it.ts + it.action} className={it.action}>
                 <td>{it.ts}</td>
                 <td className="mono">{it.ref}</td>
                 <td>{it.orderClass}</td>
@@ -268,7 +291,7 @@ export function Circuit({
             {m.intents.length === 0 && (
               <tr>
                 <td colSpan={7} className="muted">
-                  heartbeats only — no order-level decisions yet
+                  channel open — no order-level signals yet (empty book or parse-only)
                 </td>
               </tr>
             )}
