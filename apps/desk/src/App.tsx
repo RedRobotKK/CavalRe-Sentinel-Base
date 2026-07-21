@@ -4,7 +4,7 @@ import { Circuit } from "./Circuit";
 import { ShaderBackdrop } from "./gl/ShaderBackdrop";
 import { CircuitThree } from "./gl/CircuitThree";
 import { Scope, type ScopeSample } from "./Scope";
-import { StreamBoard } from "./StreamBoard";
+import { DecisionFunnel } from "./DecisionFunnel";
 
 type RecordRow = {
   seq?: number;
@@ -30,7 +30,7 @@ export function App() {
     try {
       const [m, l, f] = await Promise.all([
         getMeta(),
-        getLatest(400),
+        getLatest(500),
         getJournalFiles(),
       ]);
       const n = l?.records?.length ?? 0;
@@ -118,7 +118,7 @@ export function App() {
         </div>
 
         <Scope samples={scopeSamples} />
-        <StreamBoard records={records} />
+        <DecisionFunnel records={records} />
       </div>
 
       <div className="side-col">
