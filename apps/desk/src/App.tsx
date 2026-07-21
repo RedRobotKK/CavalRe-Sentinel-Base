@@ -3,7 +3,6 @@ import { getLatest, getMeta, getJournalFiles } from "./api";
 import { Circuit } from "./Circuit";
 import { ShaderBackdrop } from "./gl/ShaderBackdrop";
 import { CircuitThree } from "./gl/CircuitThree";
-import { Scope, type ScopeSample } from "./Scope";
 
 type RecordRow = {
   seq?: number;
@@ -23,7 +22,6 @@ export function App() {
   const [clock, setClock] = useState(() => new Date().toISOString().slice(11, 19));
   const [prevCount, setPrevCount] = useState(0);
   const [pulseKey, setPulseKey] = useState(0);
-  const [scopeSamples, setScopeSamples] = useState<ScopeSample[]>([]);
 
   const refresh = useCallback(async () => {
     try {
@@ -39,16 +37,6 @@ export function App() {
       setLatest(l);
       setFiles(f.files ?? []);
       setErr(null);
-
-      const recs: RecordRow[] = l?.records ?? [];
-      const hearts = [...recs].reverse().find((r) => r.reason === "cycle_heartbeat");
-      const raw = Number(hearts?.context?.raw ?? 0);
-      const accepted = Number(hearts?.context?.accepted ?? 0);
-      const rejected = Number(hearts?.context?.rejected ?? 0);
-      const waited = Number(hearts?.context?.waited ?? 0);
-      setScopeSamples((s) =>
-        [...s, { t: Date.now(), raw, accepted, rejected, waited }].slice(-100)
-      );
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -74,9 +62,9 @@ export function App() {
   const book = summary?.book;
   const records: RecordRow[] = latest?.records ?? [];
   const go = meta?.goNoGo;
-  const activity = Math.min(1, (summary?.n ?? 0) / 60 + (scopeSamples.at(-1)?.raw ?? 0) * 0.3);
+  const activity = Math.min(1, (summary?.n ?? 0) / 60);
+  const modeLabel = meta?.mode?.label ?? "VIEW";
 
-  // top reject reasons for side panel (compact)
   const topReasons = (() => {
     const map = new Map<string, number>();
     for (const r of records) {
@@ -105,12 +93,19 @@ export function App() {
         </div>
         <div className="pills">
           <span className="hud-clock">{clock}Z</span>
+          <span className="pill on">{modeLabel}</span>
+          <span className="pill on">WRITE OFF</span>
           <span className={`pill ${go?.verdict === "NO_GO" ? "off" : "on"}`}>
             {go?.verdict ?? "…"}
           </span>
-          <span className="pill on live-blip">{meta?.network ?? "base"}</span>
+          <span className="pill on live-blip">{meta?.network ?? "base-mainnet"}</span>
           <span className="pill">{meta?.orderType ?? "Dutch_V3"}</span>
-          <span className="pill on">LIVE CAPITAL OFF</span>
+          <span className="pill muted-pill" title={meta?.sources?.uniswapx?.url}>
+            UNISWAPX
+          </span>
+          <span className="pill muted-pill" title={meta?.sources?.baseRpc?.url}>
+            RPC
+          </span>
           <span className="pill muted-pill">poll {tick}</span>
           <button type="button" onClick={() => refresh()}>
             poll
@@ -129,11 +124,33 @@ export function App() {
           <CircuitThree pulseKey={pulseKey} />
           <Circuit records={records} pulseKey={pulseKey} />
         </div>
-
-        <Scope samples={scopeSamples} />
       </div>
 
       <div className="side-col">
+        <div className="panel panel-rise">
+          <h2>Sources · VIEW</h2>
+          <div className="metric-row">
+            <span>mode</span>
+            <span className="good">{modeLabel}</span>
+          </div>
+          <div className="metric-row">
+            <span>intents</span>
+            <span>UniswapX Dutch_V3</span>
+          </div>
+          <div className="metric-row">
+            <span>ref cost</span>
+            <span>Base QuoterV2</span>
+          </div>
+          <div className="metric-row">
+            <span>write / sign</span>
+            <span className="good">OFF</span>
+          </div>
+          <div className="metric-row">
+            <span>sim</span>
+            <span>npm run simulate</span>
+          </div>
+        </div>
+
         <div className="panel panel-rise">
           <h2>Go / No-Go</h2>
           <div className="metric-row">
@@ -187,26 +204,13 @@ export function App() {
 
         <div className="panel panel-rise">
           <h2>Drop reasons</h2>
-          {topReasons.length === 0 && (
-            <div className="muted">none yet</div>
-          )}
+          {topReasons.length === 0 && <div className="muted">none yet</div>}
           {topReasons.map((r) => (
             <div className="metric-row" key={r.name}>
               <span title={r.name}>{r.name}</span>
               <span className="bad">×{r.n}</span>
             </div>
           ))}
-        </div>
-
-        <div className="panel panel-rise">
-          <h2>Risk</h2>
-          {meta?.risk &&
-            Object.entries(meta.risk).map(([k, v]) => (
-              <div className="metric-row" key={k}>
-                <span>{k}</span>
-                <span>{String(v)}</span>
-              </div>
-            ))}
         </div>
 
         <div className="panel panel-rise">
