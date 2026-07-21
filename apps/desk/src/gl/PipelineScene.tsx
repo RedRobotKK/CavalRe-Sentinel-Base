@@ -98,9 +98,8 @@ export function PipelineScene({
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x060301, 0.024);
+    scene.fog = new THREE.FogExp2(0x060301, 0.022);
 
-    // Balanced framing — full chain visible with side margin
     const camera = new THREE.PerspectiveCamera(36, 2, 0.1, 80);
     camera.position.set(0, 4.4, 13.5);
     camera.lookAt(0, 0.35, 0);
@@ -116,15 +115,136 @@ export function PipelineScene({
     if (Array.isArray(gm)) {
       gm.forEach((m) => {
         m.transparent = true;
-        m.opacity = 0.38;
+        m.opacity = 0.32;
       });
     } else {
       gm.transparent = true;
-      gm.opacity = 0.38;
+      gm.opacity = 0.32;
     }
     scene.add(grid);
 
-    // even spacing, mid-size boxes
+    // ——— translucent blockchain network (BEHIND stages, z < 0) ———
+    const chainGroup = new THREE.Group();
+    chainGroup.position.z = -3.5;
+    scene.add(chainGroup);
+
+    const CCOLS = 9;
+    const CROWS = 4;
+    const CN = CCOLS * CROWS;
+    const cPos = new Float32Array(CN * 3);
+    const cBlocks: THREE.Mesh[] = [];
+    const cGeo = new THREE.BoxGeometry(0.42, 0.28, 0.42);
+
+    for (let r = 0; r < CROWS; r++) {
+      for (let c = 0; c < CCOLS; c++) {
+        const i = r * CCOLS + c;
+        const x = (c - (CCOLS - 1) / 2) * 2.8 + (r % 2) * 1.3;
+        const y = (r - (CROWS - 1) / 2) * 1.7 + 0.8;
+        const z = (Math.sin(c * 0.8 + r) * 0.8);
+        cPos[i * 3] = x;
+        cPos[i * 3 + 1] = y;
+        cPos[i * 3 + 2] = z;
+
+        const mat = new THREE.MeshBasicMaterial({
+          color: 0xff9a1a,
+          transparent: true,
+          opacity: 0.12,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        });
+        const mesh = new THREE.Mesh(cGeo, mat);
+        mesh.position.set(x, y, z);
+        mesh.rotation.y = 0.35;
+        chainGroup.add(mesh);
+        cBlocks.push(mesh);
+      }
+    }
+
+    const cEdges: number[] = [];
+    for (let i = 0; i < CN; i++) {
+      for (let j = i + 1; j < CN; j++) {
+        const d = Math.hypot(
+          cPos[i * 3]! - cPos[j * 3]!,
+          cPos[i * 3 + 1]! - cPos[j * 3 + 1]!,
+          cPos[i * 3 + 2]! - cPos[j * 3 + 2]!
+        );
+        if (d < 3.4) {
+          cEdges.push(
+            cPos[i * 3]!,
+            cPos[i * 3 + 1]!,
+            cPos[i * 3 + 2]!,
+            cPos[j * 3]!,
+            cPos[j * 3 + 1]!,
+            cPos[j * 3 + 2]!
+          );
+        }
+      }
+    }
+    const cEdgeGeo = new THREE.BufferGeometry();
+    cEdgeGeo.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(cEdges, 3)
+    );
+    const cEdgeMat = new THREE.LineBasicMaterial({
+      color: 0xff8c1a,
+      transparent: true,
+      opacity: 0.09,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    chainGroup.add(new THREE.LineSegments(cEdgeGeo, cEdgeMat));
+
+    // hopping packets on the translucent chain
+    const CPKT = 70;
+    const cpPos = new Float32Array(CPKT * 3);
+    const cpFrom = new Float32Array(CPKT * 3);
+    const cpTo = new Float32Array(CPKT * 3);
+    const cpPhase = new Float32Array(CPKT);
+    const cpSpeed = new Float32Array(CPKT);
+
+    function pickChainHop(i: number) {
+      const a = Math.floor(Math.random() * CN);
+      let b = Math.floor(Math.random() * CN);
+      for (let t = 0; t < 8; t++) {
+        const cand = Math.floor(Math.random() * CN);
+        const d = Math.hypot(
+          cPos[a * 3]! - cPos[cand * 3]!,
+          cPos[a * 3 + 1]! - cPos[cand * 3 + 1]!,
+          cPos[a * 3 + 2]! - cPos[cand * 3 + 2]!
+        );
+        if (d < 3.5 && cand !== a) {
+          b = cand;
+          break;
+        }
+      }
+      cpFrom[i * 3] = cPos[a * 3]!;
+      cpFrom[i * 3 + 1] = cPos[a * 3 + 1]!;
+      cpFrom[i * 3 + 2] = cPos[a * 3 + 2]!;
+      cpTo[i * 3] = cPos[b * 3]!;
+      cpTo[i * 3 + 1] = cPos[b * 3 + 1]!;
+      cpTo[i * 3 + 2] = cPos[b * 3 + 2]!;
+      cpPhase[i] = 0;
+      cpSpeed[i] = 0.18 + Math.random() * 0.28;
+    }
+    for (let i = 0; i < CPKT; i++) {
+      pickChainHop(i);
+      cpPhase[i] = Math.random();
+    }
+
+    const cpGeo = new THREE.BufferGeometry();
+    cpGeo.setAttribute("position", new THREE.BufferAttribute(cpPos, 3));
+    const cpMat = new THREE.PointsMaterial({
+      color: 0xffe0a0,
+      size: 0.11,
+      transparent: true,
+      opacity: 0.4,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      sizeAttenuation: true,
+    });
+    chainGroup.add(new THREE.Points(cpGeo, cpMat));
+
+    // ——— foreground stage pipeline ———
     const spacing = 2.5;
     const x0 = -((N - 1) * spacing) / 2;
 
@@ -171,7 +291,7 @@ export function PipelineScene({
       nodes.push(mesh);
     }
 
-    const PKT = 100;
+    const PKT = 90;
     const pktPos = new Float32Array(PKT * 3);
     const pktU = new Float32Array(PKT);
     const pktSp = new Float32Array(PKT);
@@ -191,29 +311,6 @@ export function PipelineScene({
       sizeAttenuation: true,
     });
     scene.add(new THREE.Points(pktGeo, pktMat));
-
-    const DUST = 140;
-    const dustPos = new Float32Array(DUST * 3);
-    for (let i = 0; i < DUST; i++) {
-      dustPos[i * 3] = (Math.random() - 0.5) * 28;
-      dustPos[i * 3 + 1] = Math.random() * 4 - 0.8;
-      dustPos[i * 3 + 2] = (Math.random() - 0.5) * 10;
-    }
-    const dustGeo = new THREE.BufferGeometry();
-    dustGeo.setAttribute("position", new THREE.BufferAttribute(dustPos, 3));
-    scene.add(
-      new THREE.Points(
-        dustGeo,
-        new THREE.PointsMaterial({
-          color: 0xc47a22,
-          size: 0.035,
-          transparent: true,
-          opacity: 0.32,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-        })
-      )
-    );
 
     const pulseRings: THREE.Mesh[] = [];
     for (let k = 0; k < 2; k++) {
@@ -288,12 +385,37 @@ export function PipelineScene({
         refreshTextures(active);
       }
 
-      // calm camera — minimal drift
       camera.position.x = Math.sin(t * 0.06) * 0.18;
       camera.position.y = 4.35 + Math.sin(t * 0.05) * 0.06;
       camera.position.z = 13.4;
       camera.lookAt(0, 0.4, 0);
 
+      // translucent chain animation
+      chainGroup.rotation.y = Math.sin(t * 0.08) * 0.12;
+      for (let i = 0; i < cBlocks.length; i++) {
+        const m = cBlocks[i]!;
+        const mat = m.material as THREE.MeshBasicMaterial;
+        const breath = 0.5 + 0.5 * Math.sin(t * 1.1 + i * 0.4);
+        mat.opacity = 0.07 + breath * 0.07 + burst * 0.08;
+        m.position.y = cPos[i * 3 + 1]! + Math.sin(t * 0.85 + i * 0.25) * 0.06;
+      }
+      const cpos = cpGeo.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < CPKT; i++) {
+        cpPhase[i] = (cpPhase[i]! + 0.016 * cpSpeed[i]!) % 1;
+        if (cpPhase[i]! < 0.016 * cpSpeed[i]!) pickChainHop(i);
+        const s = cpPhase[i]! * cpPhase[i]! * (3 - 2 * cpPhase[i]!);
+        cpos.setXYZ(
+          i,
+          cpFrom[i * 3]! + (cpTo[i * 3]! - cpFrom[i * 3]!) * s,
+          cpFrom[i * 3 + 1]! + (cpTo[i * 3 + 1]! - cpFrom[i * 3 + 1]!) * s,
+          cpFrom[i * 3 + 2]! + (cpTo[i * 3 + 2]! - cpFrom[i * 3 + 2]!) * s
+        );
+      }
+      cpos.needsUpdate = true;
+      cpMat.opacity = 0.28 + burst * 0.2 + inten * 0.12;
+      cEdgeMat.opacity = 0.07 + burst * 0.05;
+
+      // stage blocks
       for (let i = 0; i < N; i++) {
         const mesh = nodes[i]!;
         const mat = materials[i]!;
@@ -306,7 +428,6 @@ export function PipelineScene({
             ? 0.32
             : 0.16;
 
-        // gentle float only
         const bob = Math.sin(t * 1.1 + i * 0.55) * 0.05;
         const lift = isCur ? 0.28 : isOn ? 0.1 : 0.02;
         mesh.position.y = 0.4 + lift + bob;
@@ -341,14 +462,6 @@ export function PipelineScene({
         }
       }
 
-      const dp = dustGeo.attributes.position as THREE.BufferAttribute;
-      for (let i = 0; i < DUST; i++) {
-        let y = dp.getY(i) + 0.0035;
-        if (y > 3.2) y = -1;
-        dp.setY(i, y);
-      }
-      dp.needsUpdate = true;
-
       busMat.opacity = 0.32 + (active / N) * 0.25 + burst * 0.12;
       key.intensity = 2.2 + burst * 1.2 + inten * 0.4;
 
@@ -364,9 +477,12 @@ export function PipelineScene({
       boxGeo.dispose();
       busGeo.dispose();
       pktGeo.dispose();
-      dustGeo.dispose();
+      cGeo.dispose();
+      cEdgeGeo.dispose();
+      cpGeo.dispose();
       textures.forEach((t) => t.dispose());
       materials.forEach((m) => m.dispose());
+      cBlocks.forEach((m) => (m.material as THREE.Material).dispose());
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) {
         mount.removeChild(renderer.domElement);
