@@ -2,8 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { getLatest, getMeta, getJournalFiles } from "./api";
 import { Circuit } from "./Circuit";
 import { ShaderBackdrop } from "./gl/ShaderBackdrop";
-import { ChainParticles } from "./gl/ChainParticles";
-import { CircuitThree } from "./gl/CircuitThree";
 import { StreamLayer } from "./StreamLayer";
 
 type RecordRow = {
@@ -70,7 +68,6 @@ export function App() {
   return (
     <div className="layout">
       <ShaderBackdrop activity={activity} />
-      <ChainParticles pulseKey={pulseKey} activity={activity} />
 
       <header className="topbar panel-rise">
         <div>
@@ -105,7 +102,6 @@ export function App() {
         )}
 
         <div className="span-main circuit-shell panel-rise">
-          <CircuitThree pulseKey={pulseKey} />
           <Circuit records={records} pulseKey={pulseKey} />
         </div>
 
