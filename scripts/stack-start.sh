@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 # Research stack supervisor.
-# Runs dry-run + desk-api + desk-web as children of THIS process.
-# Killing this process (Ctrl+C, kill, terminal close) stops all children.
+# Children die with the parent (Ctrl+C / kill / terminal close).
 #
-# Usage:
-#   npm run stack
-#   BASE_RPC_URL=https://mainnet.base.org npm run stack
+# Usage: npm run stack
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,10 +12,23 @@ mkdir -p logs run
 RPC="${BASE_RPC_URL:-https://mainnet.base.org}"
 export BASE_RPC_URL="$RPC"
 
-# Clean prior pid bookkeeping / stragglers
+free_ports() {
+  for port in 8787 5173 5174 5175; do
+    local extras
+    extras=$(lsof -ti :"$port" 2>/dev/null || true)
+    if [[ -n "${extras}" ]]; then
+      echo "[stack] freeing :$port (pids $extras)"
+      kill -TERM $extras 2>/dev/null || true
+      sleep 0.2
+      kill -KILL $extras 2>/dev/null || true
+    fi
+  done
+}
+
 if [[ -f run/stack.pids ]]; then
   bash scripts/stack-stop.sh >/dev/null 2>&1 || true
 fi
+free_ports
 
 PIDS=()
 NAMES=()
@@ -42,14 +52,7 @@ cleanup() {
       kill -KILL "$pid" 2>/dev/null || true
     fi
   done
-  # free ports if anything lingered
-  for port in 8787 5173 5174 5175; do
-    local extras
-    extras=$(lsof -ti :"$port" 2>/dev/null || true)
-    if [[ -n "${extras}" ]]; then
-      kill -TERM $extras 2>/dev/null || true
-    fi
-  done
+  free_ports
   rm -f run/stack.pids
   echo "[stack] all children stopped"
   exit "$code"
@@ -61,8 +64,8 @@ start_one() {
   local name="$1"
   shift
   local log="logs/${name}.log"
+  : >"$log"
   echo "[stack] starting ${name} → ${log}"
-  # Same process group lineage (no nohup) so parent death can reap them
   env BASE_RPC_URL="$RPC" "$@" >>"$log" 2>&1 &
   local pid=$!
   PIDS+=("$pid")
@@ -75,7 +78,22 @@ start_one() {
 
 start_one dry-run   npx tsx scripts/dry-run-harness.mjs
 start_one desk-api  node scripts/desk-api.mjs
-start_one desk-web  npm run dev -w @cavalre/desk
+# Use npx vite directly so the process stays alive (npm can exit early in some setups)
+start_one desk-web  npx vite --host 127.0.0.1 --port 5173 --config apps/desk/vite.config.ts
+
+# Brief startup grace — surface immediate failures
+sleep 1.5
+for i in "${!PIDS[@]}"; do
+  pid="${PIDS[$i]}"
+  name="${NAMES[$i]}"
+  if ! kill -0 "$pid" 2>/dev/null; then
+    echo "[stack] ERROR: $name (pid=$pid) exited during startup"
+    echo "[stack] --- logs/${name}.log (tail) ---"
+    tail -n 40 "logs/${name}.log" 2>/dev/null || true
+    echo "[stack] --- end ---"
+    exit 1
+  fi
+done
 
 cat > run/stack.env <<EOF
 BASE_RPC_URL=$RPC
@@ -86,17 +104,21 @@ EOF
 echo
 echo "[stack] supervisor pid=$$ (keep this terminal open)"
 echo "  RPC:     $RPC"
-echo "  Desk UI: http://127.0.0.1:5173  (see logs/desk-web.log if port differs)"
+echo "  Desk UI: http://127.0.0.1:5173"
 echo "  API:     http://127.0.0.1:8787"
 echo "  Logs:    logs/*.log"
 echo "  Stop:    Ctrl+C  or  npm run stack:stop"
 echo
 
-# Wait until any child dies, then tear everything down
 while true; do
-  for pid in "${PIDS[@]}"; do
+  for i in "${!PIDS[@]}"; do
+    pid="${PIDS[$i]}"
+    name="${NAMES[$i]}"
     if ! kill -0 "$pid" 2>/dev/null; then
-      echo "[stack] child pid=$pid exited — shutting down stack"
+      echo "[stack] child $name pid=$pid exited — shutting down stack"
+      echo "[stack] --- logs/${name}.log (tail) ---"
+      tail -n 40 "logs/${name}.log" 2>/dev/null || true
+      echo "[stack] --- end ---"
       exit 1
     fi
   done
