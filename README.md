@@ -3,7 +3,7 @@
 > Production-grade, capital-safety-first UniswapX filler and autonomous trading system on **Base**.
 > Built with explicit TDD, fail-closed risk controls, and arbitrary-precision math.
 
-**Status**: Bootstrap / Phase 0 (dry-run foundation)  
+**Status**: Phase 0 complete (dry-run foundation)  
 **Primary venue**: Base (chainId `8453`) + UniswapX (permissionless filler)  
 **Starting capital target**: ~$1,000 with strict compounding discipline
 
@@ -16,7 +16,19 @@
 5. **Hard risk limits in code** — RiskEngine is a gate, not a suggestion
 6. **DecisionJournal** — every decision is recorded with full context
 7. **DefiLlama** is a required verification source for any market-size or volume claims
-8. **Dry-run is the default**. Live mode requires explicit configuration.
+8. **Uniswap/UniswapX** is a required verification source for all filler / reactor / order behavior — see [docs/TRUST_UNISWAPX.md](docs/TRUST_UNISWAPX.md)
+9. **Dry-run is the default**. Live mode requires explicit configuration.
+
+## RULE OF TRUST Sources
+
+| Source | Why |
+|--------|-----|
+| [Uniswap/UniswapX](https://github.com/Uniswap/UniswapX) | Canonical reactors, fill interface, Base deployments, order structs |
+| [DefiLlama](https://defillama.com/) | Volume / TVL / market structure claims |
+| [CavalRe/cavalre-contracts](https://github.com/CavalRe/cavalre-contracts) | FloatLib origin, accounting discipline |
+| [near/intents](https://github.com/near/intents) | Intent patterns (historical / comparative) |
+| [RedRobotKK/CavalRe-Sentinel](https://github.com/RedRobotKK/CavalRe-Sentinel) | Prior safety core & research |
+| This repo | Implementation under test |
 
 ## Why Base First
 
@@ -25,20 +37,26 @@
 - EVM → maximal reuse of existing safety patterns and TypeScript tooling
 - Meaningful Uniswap volume (verify on DefiLlama)
 - Clean operational surface for the first live adapter
+- Both **Priority** and **DutchV3** reactors deployed (see TRUST_UNISWAPX.md)
 
 ## Repository Layout
 
 ```
 packages/
-  core/             # Shared types, Amount primitive, utilities (test-first)
-  risk-engine/      # Hard position sizing, daily loss, drawdown limits
-  journal/          # DecisionJournal (versioned, append-only style) — next
-  uniswapx-base/    # Base + UniswapX poller, order parser, filler adapter — next
+  core/             # Amount primitive (bigint), serialization
+  risk-engine/      # Hard position / daily loss / drawdown limits
+  journal/          # DecisionJournal + markout/toxicity scaffolding
+  uniswapx-base/    # Base poller + Dutch/Priority-aware parser
+  wallet/           # Non-custodial signer + ERC-20 encoding
 src/
-  runner/           # Composition root (dry-run by default) — next
-.github/workflows/
-  ci.yml            # Typecheck + Test + basic secret scan on every push/PR
-docs/               # Design notes, runbooks, phase plans
+  runner/           # Composition root (dry-run default)
+scripts/
+  dry-run-harness.mjs   # Long-running live order → JSONL journal
+docs/
+  TRUST_UNISWAPX.md     # Expert map of UniswapX (mandatory reading)
+  PHASE_0.md
+  WALLET.md
+  DESIGN_PEER_REVIEW.md
 ```
 
 ## Development Workflow (Mandatory)
@@ -47,34 +65,32 @@ docs/               # Design notes, runbooks, phase plans
 2. Implement the minimum code to make the test pass.
 3. Refactor while keeping tests green.
 4. CI must pass before any merge to `main`.
+5. Any claim about UniswapX behavior → verify against [Uniswap/UniswapX](https://github.com/Uniswap/UniswapX).
 
 ```bash
-# Install
 npm install
-
-# Run all tests (CI equivalent)
 npm test
-
-# Typecheck
 npm run typecheck
+npm run dry-run          # live Base orders → journals/*.jsonl (no keys)
 ```
 
 ## Phase Plan (Summary)
 
-| Phase | Goal                              | Capital at Risk | Exit Criteria                                      |
-|-------|-----------------------------------|------------------|----------------------------------------------------|
-| 0     | Core + UniswapX dry-run on Base   | $0               | Stable journal, clean CI, markout scaffolding      |
-| 1     | Tiny live probes                  | ≤ $200           | Fills match dry-run predictions, no unexpected halt|
-| 2     | Controlled $1k operation          | $1,000           | Positive expectancy after costs + toxicity filter  |
+| Phase | Goal | Capital at Risk | Exit Criteria |
+|-------|------|------------------|---------------|
+| 0 | Core + dry-run on Base | $0 | Done (code). Operate harness for multi-day journals. |
+| 1 | Tiny live probes | ≤ $200 | Fills match dry-run predictions, no unexpected halt |
+| 2 | Controlled $1k operation | $1,000 | Positive expectancy after costs + toxicity filter |
 
 ## Related Repositories
 
 - Original safety core & research: [CavalRe-Sentinel](https://github.com/RedRobotKK/CavalRe-Sentinel)
 - CavalRe contracts: [cavalre-contracts](https://github.com/CavalRe/cavalre-contracts)
-- NEAR Intents reference: [near/intents](https://github.com/near/intents)
+- **UniswapX (TRUST):** [Uniswap/UniswapX](https://github.com/Uniswap/UniswapX)
 
 ---
 
 **Capital safety > daily PnL.**  
 **Journal quality > volume.**  
-**Tests before implementation.**
+**Tests before implementation.**  
+**NEVER TRUST, ALWAYS VERIFY.**
