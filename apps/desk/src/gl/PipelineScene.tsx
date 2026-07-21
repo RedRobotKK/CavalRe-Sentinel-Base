@@ -60,7 +60,6 @@ function makeLabelTexture(s: StageVisual, active: boolean): THREE.CanvasTexture 
   return tex;
 }
 
-/** Soft hex-digit column texture for rain */
 function makeHexRainTexture(): THREE.CanvasTexture {
   const w = 64;
   const h = 256;
@@ -130,7 +129,6 @@ export function PipelineScene({
     key.position.set(0, 7, 8);
     scene.add(key);
 
-    // floor grid — softer
     const grid = new THREE.GridHelper(48, 48, 0x6a3a10, 0x1e1208);
     grid.position.y = -1.55;
     const gm = grid.material as THREE.Material | THREE.Material[];
@@ -145,11 +143,10 @@ export function PipelineScene({
     }
     scene.add(grid);
 
-    // ——— CREATIVE BACKDROP (full hero space, translucent) ———
+    // backdrop
     const bg = new THREE.Group();
     scene.add(bg);
 
-    // 1) Large orbital rings (consensus orbits)
     const orbits: THREE.Mesh[] = [];
     for (let i = 0; i < 4; i++) {
       const radius = 4.5 + i * 2.2;
@@ -169,7 +166,6 @@ export function PipelineScene({
       orbits.push(mesh);
     }
 
-    // 2) Hex-digit rain planes (subtle columns)
     const rainTex = makeHexRainTexture();
     const rains: THREE.Mesh[] = [];
     for (let i = 0; i < 12; i++) {
@@ -182,17 +178,12 @@ export function PipelineScene({
         side: THREE.DoubleSide,
       });
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 6.5), mat);
-      plane.position.set(
-        (i - 5.5) * 2.1,
-        1.2,
-        -5.5 - (i % 3) * 1.2
-      );
+      plane.position.set((i - 5.5) * 2.1, 1.2, -5.5 - (i % 3) * 1.2);
       plane.rotation.y = Math.sin(i) * 0.15;
       bg.add(plane);
       rains.push(plane);
     }
 
-    // 3) Far particle nebula (depth)
     const NEB = 280;
     const nebPos = new Float32Array(NEB * 3);
     for (let i = 0; i < NEB; i++) {
@@ -215,7 +206,6 @@ export function PipelineScene({
     });
     bg.add(new THREE.Points(nebGeo, nebMat));
 
-    // 4) Propagation waves on the floor
     const waves: THREE.Mesh[] = [];
     for (let i = 0; i < 3; i++) {
       const geo = new THREE.RingGeometry(0.3, 0.38, 64);
@@ -235,7 +225,6 @@ export function PipelineScene({
     }
     let waveClock = 0;
 
-    // 5) Slow drifting “shard” planes (glass blocks in depth)
     const shards: THREE.Mesh[] = [];
     const shardGeo = new THREE.BoxGeometry(0.7, 0.45, 0.08);
     for (let i = 0; i < 18; i++) {
@@ -258,28 +247,9 @@ export function PipelineScene({
       shards.push(mesh);
     }
 
-    // ——— foreground stage pipeline ———
+    // ——— stage pipeline ———
     const spacing = 2.5;
     const x0 = -((N - 1) * spacing) / 2;
-
-    const busPts = [
-      new THREE.Vector3(x0 - 1.1, 0, 0),
-      ...Array.from(
-        { length: N },
-        (_, i) => new THREE.Vector3(x0 + i * spacing, 0, 0)
-      ),
-      new THREE.Vector3(x0 + (N - 1) * spacing + 1.1, 0, 0),
-    ];
-    const busCurve = new THREE.CatmullRomCurve3(busPts);
-    const busGeo = new THREE.TubeGeometry(busCurve, 80, 0.04, 8, false);
-    const busMat = new THREE.MeshBasicMaterial({
-      color: 0xff9f1a,
-      transparent: true,
-      opacity: 0.42,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    scene.add(new THREE.Mesh(busGeo, busMat));
 
     const nodes: THREE.Mesh[] = [];
     const materials: THREE.MeshStandardMaterial[] = [];
@@ -305,26 +275,92 @@ export function PipelineScene({
       nodes.push(mesh);
     }
 
-    const PKT = 90;
-    const pktPos = new Float32Array(PKT * 3);
-    const pktU = new Float32Array(PKT);
-    const pktSp = new Float32Array(PKT);
-    for (let i = 0; i < PKT; i++) {
-      pktU[i] = Math.random();
-      pktSp[i] = 0.07 + Math.random() * 0.1;
+    // Inter-block bridges: arc curves + segment tubes + traveling beads
+    type Bridge = {
+      curve: THREE.CatmullRomCurve3;
+      tube: THREE.Mesh;
+      tubeMat: THREE.MeshBasicMaterial;
+      bead: THREE.Mesh;
+      beadMat: THREE.MeshBasicMaterial;
+      sparks: THREE.Points;
+      sparkPos: Float32Array;
+      sparkU: Float32Array;
+    };
+    const bridges: Bridge[] = [];
+
+    for (let i = 0; i < N - 1; i++) {
+      const xA = x0 + i * spacing + 0.95;
+      const xB = x0 + (i + 1) * spacing - 0.95;
+      const mid = (xA + xB) / 2;
+      const curve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(xA, 0.35, 0),
+        new THREE.Vector3(mid, 0.75, 0.15),
+        new THREE.Vector3(xB, 0.35, 0),
+      ]);
+
+      const tubeGeo = new THREE.TubeGeometry(curve, 24, 0.035, 6, false);
+      const tubeMat = new THREE.MeshBasicMaterial({
+        color: 0xff9f1a,
+        transparent: true,
+        opacity: 0.2,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const tube = new THREE.Mesh(tubeGeo, tubeMat);
+      scene.add(tube);
+
+      const beadMat = new THREE.MeshBasicMaterial({
+        color: 0xffe0a0,
+        transparent: true,
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const bead = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 12), beadMat);
+      scene.add(bead);
+
+      const SPARK = 14;
+      const sparkPos = new Float32Array(SPARK * 3);
+      const sparkU = new Float32Array(SPARK);
+      for (let s = 0; s < SPARK; s++) sparkU[s] = Math.random();
+      const sparkGeo = new THREE.BufferGeometry();
+      sparkGeo.setAttribute("position", new THREE.BufferAttribute(sparkPos, 3));
+      const sparks = new THREE.Points(
+        sparkGeo,
+        new THREE.PointsMaterial({
+          color: 0xffc266,
+          size: 0.07,
+          transparent: true,
+          opacity: 0.7,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          sizeAttenuation: true,
+        })
+      );
+      scene.add(sparks);
+
+      bridges.push({ curve, tube, tubeMat, bead, beadMat, sparks, sparkPos, sparkU });
     }
-    const pktGeo = new THREE.BufferGeometry();
-    pktGeo.setAttribute("position", new THREE.BufferAttribute(pktPos, 3));
-    const pktMat = new THREE.PointsMaterial({
-      color: 0xffe0a0,
-      size: 0.12,
+
+    // base bus under arcs
+    const busPts = [
+      new THREE.Vector3(x0 - 1.1, 0.05, 0),
+      ...Array.from(
+        { length: N },
+        (_, i) => new THREE.Vector3(x0 + i * spacing, 0.05, 0)
+      ),
+      new THREE.Vector3(x0 + (N - 1) * spacing + 1.1, 0.05, 0),
+    ];
+    const busCurve = new THREE.CatmullRomCurve3(busPts);
+    const busGeo = new THREE.TubeGeometry(busCurve, 80, 0.03, 6, false);
+    const busMat = new THREE.MeshBasicMaterial({
+      color: 0xff9f1a,
       transparent: true,
-      opacity: 0.85,
-      depthWrite: false,
+      opacity: 0.28,
       blending: THREE.AdditiveBlending,
-      sizeAttenuation: true,
+      depthWrite: false,
     });
-    scene.add(new THREE.Points(pktGeo, pktMat));
+    scene.add(new THREE.Mesh(busGeo, busMat));
 
     let raf = 0;
     let alive = true;
@@ -385,22 +421,19 @@ export function PipelineScene({
       camera.position.z = 13.4;
       camera.lookAt(0, 0.4, 0);
 
-      // orbits spin slowly, different rates
       orbits.forEach((o, i) => {
         o.rotation.z = t * (0.04 + i * 0.015) * (i % 2 === 0 ? 1 : -1);
-        const mat = o.material as THREE.MeshBasicMaterial;
-        mat.opacity = 0.06 + i * 0.012 + burst * 0.05;
+        (o.material as THREE.MeshBasicMaterial).opacity =
+          0.06 + i * 0.012 + burst * 0.05;
       });
 
-      // hex rain scrolls
       rainTex.offset.y = (t * 0.12) % 1;
       rains.forEach((p, i) => {
         p.position.y = 1.2 + Math.sin(t * 0.3 + i) * 0.2;
-        const mat = p.material as THREE.MeshBasicMaterial;
-        mat.opacity = 0.08 + (i % 3) * 0.02 + burst * 0.04;
+        (p.material as THREE.MeshBasicMaterial).opacity =
+          0.08 + (i % 3) * 0.02 + burst * 0.04;
       });
 
-      // nebula drift
       const np = nebGeo.attributes.position as THREE.BufferAttribute;
       for (let i = 0; i < NEB; i++) {
         let y = np.getY(i) + 0.004 * ((i % 4) + 1);
@@ -410,28 +443,23 @@ export function PipelineScene({
       np.needsUpdate = true;
       nebMat.opacity = 0.28 + burst * 0.12;
 
-      // floor propagation waves
       waves.forEach((w, i) => {
         const wt = waveClock - i * 0.35;
         const mat = w.material as THREE.MeshBasicMaterial;
-        if (wt < 0 || wt > 2.4) {
-          mat.opacity = 0;
-        } else {
+        if (wt < 0 || wt > 2.4) mat.opacity = 0;
+        else {
           const s = 0.4 + wt * 5.5;
           w.scale.set(s, s, s);
           mat.opacity = (1 - wt / 2.4) * 0.22;
         }
       });
-      // ambient slow waves even without pulse
       if (waveClock > 4) waveClock = 0;
 
-      // shards tumble slowly in the distance
       shards.forEach((s, i) => {
         s.rotation.x += 0.002 + (i % 3) * 0.0005;
         s.rotation.y += 0.003;
-        s.position.x += Math.sin(t * 0.2 + i) * 0.002;
-        const mat = s.material as THREE.MeshBasicMaterial;
-        mat.opacity = 0.04 + 0.03 * Math.sin(t + i);
+        (s.material as THREE.MeshBasicMaterial).opacity =
+          0.04 + 0.03 * Math.sin(t + i);
       });
 
       // stages
@@ -440,33 +468,52 @@ export function PipelineScene({
         const mat = materials[i]!;
         const isOn = i <= active;
         const isCur = i === active;
-
         mat.emissiveIntensity = isCur
           ? 0.6 + burst * 0.4
           : isOn
             ? 0.32
             : 0.16;
-
         const bob = Math.sin(t * 1.1 + i * 0.55) * 0.05;
         const lift = isCur ? 0.28 : isOn ? 0.1 : 0.02;
         mesh.position.y = 0.4 + lift + bob;
         mesh.rotation.x = -0.14;
-        mesh.rotation.y = 0;
         mesh.scale.setScalar(isCur ? 1.04 + burst * 0.03 : 1);
       }
 
-      const maxU = Math.max(0.1, (active + 0.55) / N);
-      const pos = pktGeo.attributes.position as THREE.BufferAttribute;
-      for (let i = 0; i < PKT; i++) {
-        let u = (pktU[i]! + t * pktSp[i]!) % 1;
-        u = u * maxU;
-        const pt = busCurve.getPointAt(Math.min(0.999, u));
-        pos.setXYZ(i, pt.x, pt.y + 0.06, pt.z);
-      }
-      pos.needsUpdate = true;
-      pktMat.opacity = 0.5 + inten * 0.25 + burst * 0.25;
+      // inter-block animations
+      for (let i = 0; i < bridges.length; i++) {
+        const b = bridges[i]!;
+        const lit = i < active; // bridge before active is hot
+        const crossing = i === active - 1 || (active === 0 && i === 0);
 
-      busMat.opacity = 0.32 + (active / N) * 0.25 + burst * 0.12;
+        b.tubeMat.opacity = lit
+          ? 0.45 + burst * 0.25
+          : 0.12 + Math.sin(t * 2 + i) * 0.04;
+        b.tubeMat.color.setHex(lit || crossing ? 0xffc266 : 0xa06020);
+
+        // bead travels on lit / near-active bridges
+        const speed = lit ? 0.55 : 0.2;
+        const u = (t * speed + i * 0.17) % 1;
+        const pt = b.curve.getPointAt(u);
+        b.bead.position.copy(pt);
+        b.bead.position.y += 0.02;
+        b.beadMat.opacity = lit ? 0.95 : 0.25;
+        b.bead.scale.setScalar(lit ? 1.2 + burst * 0.4 : 0.7);
+
+        // spark trail along arc
+        const attr = b.sparks.geometry.attributes.position as THREE.BufferAttribute;
+        for (let s = 0; s < b.sparkU.length; s++) {
+          const su = (b.sparkU[s]! + t * (0.3 + s * 0.02)) % 1;
+          const sp = b.curve.getPointAt(su);
+          attr.setXYZ(s, sp.x, sp.y + Math.sin(t * 6 + s) * 0.03, sp.z);
+        }
+        attr.needsUpdate = true;
+        (b.sparks.material as THREE.PointsMaterial).opacity = lit
+          ? 0.75
+          : 0.2;
+      }
+
+      busMat.opacity = 0.22 + (active / N) * 0.25 + burst * 0.1;
       key.intensity = 2.2 + burst * 1.2 + inten * 0.4;
 
       renderer.render(scene, camera);
@@ -480,7 +527,6 @@ export function PipelineScene({
       window.removeEventListener("resize", resize);
       boxGeo.dispose();
       busGeo.dispose();
-      pktGeo.dispose();
       nebGeo.dispose();
       shardGeo.dispose();
       rainTex.dispose();
