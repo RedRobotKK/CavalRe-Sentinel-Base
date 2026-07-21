@@ -6,6 +6,8 @@ import {
   isGT,
   isGTE,
   ZERO,
+  amountToString,
+  amountFromString,
 } from "../src/amount.js";
 
 describe("Amount (core money primitive)", () => {
@@ -81,6 +83,21 @@ describe("Amount (core money primitive)", () => {
   describe("ZERO", () => {
     it("is the zero amount", () => {
       expect(ZERO).toBe(0n);
+    });
+  });
+
+  describe("serialization (journal safety)", () => {
+    it("amountToString preserves full precision", () => {
+      const big = toAmount("9007199254740993"); // > Number.MAX_SAFE_INTEGER
+      expect(amountToString(big)).toBe("9007199254740993");
+      // Prove Number would have lost precision
+      expect(Number(big.toString())).not.toBe(9007199254740993);
+    });
+
+    it("amountFromString round-trips", () => {
+      const original = toAmount("12345678901234567890");
+      const restored = amountFromString(amountToString(original));
+      expect(restored).toBe(original);
     });
   });
 });

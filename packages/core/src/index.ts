@@ -6,4 +6,6 @@ export {
   isGT,
   isGTE,
   ZERO,
+  amountToString,
+  amountFromString,
 } from "./amount.js";

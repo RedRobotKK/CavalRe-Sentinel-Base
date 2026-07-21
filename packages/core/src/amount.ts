@@ -1,7 +1,7 @@
 /**
  * Minimal amount primitive for CavalRe-Sentinel-Base.
  *
- * Rules:
+ * Rules (enforced):
  * - All token amounts and USD notionals are represented as bigint (raw units or scaled).
  * - No JavaScript `number` is used for value-bearing quantities.
  * - This is the seed of the FloatLib discipline carried from CavalRe contracts.
@@ -64,3 +64,18 @@ export function isGTE(a: Amount, b: Amount): boolean {
  * Zero amount constant.
  */
 export const ZERO: Amount = 0n;
+
+/**
+ * Serialize an Amount to a decimal string for JSON / journals.
+ * Never use Number() — precision must be preserved.
+ */
+export function amountToString(a: Amount): string {
+  return a.toString();
+}
+
+/**
+ * Parse an Amount from a journal / JSON decimal string.
+ */
+export function amountFromString(s: string): Amount {
+  return toAmount(s);
+}
