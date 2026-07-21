@@ -1,0 +1,87 @@
+/* Flow rail — imported conceptually; inlined in styles.css below via App if needed */
+.flow-rail {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 14px;
+  padding: 8px 4px 4px;
+}
+.flow-svg {
+  width: 100%;
+  height: 48px;
+  display: block;
+}
+.flow-bus {
+  stroke: #3a2010;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.flow-bus-hot {
+  stroke: #ff9f1a;
+  stroke-width: 3;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+.flow-node {
+  fill: #1a0e04;
+  stroke: #5c3310;
+  stroke-width: 1.5;
+  transition: r 0.15s, fill 0.15s;
+}
+.flow-node.on {
+  fill: #ff9f1a;
+  stroke: #ffc266;
+}
+.flow-node.current {
+  fill: #ffe0a0;
+  stroke: #fff3d0;
+}
+.flow-packet {
+  fill: #ffe0a0;
+  stroke: #ffb000;
+  stroke-width: 1;
+}
+.flow-labels {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  margin-top: 2px;
+}
+.flow-stage {
+  text-align: center;
+  padding: 6px 2px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+.flow-stage.on {
+  border-color: rgba(255, 160, 40, 0.35);
+  background: rgba(255, 160, 40, 0.06);
+}
+.flow-stage.current {
+  border-color: rgba(255, 200, 80, 0.7);
+  box-shadow: 0 0 14px rgba(255, 160, 40, 0.25);
+  background: rgba(255, 176, 0, 0.12);
+}
+.flow-stage.has-drop {
+  border-bottom-color: rgba(255, 80, 40, 0.55);
+}
+.flow-stage-name {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--muted, #8a5a1e);
+}
+.flow-stage.current .flow-stage-name,
+.flow-stage.on .flow-stage-name {
+  color: var(--phosphor, #ffb000);
+}
+.flow-stage-n {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--phosphor, #ffb000);
+  margin-top: 2px;
+}
+.flow-stage-drop {
+  font-size: 9px;
+  color: var(--bad, #ff5533);
+  min-height: 12px;
+}
