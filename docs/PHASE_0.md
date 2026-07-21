@@ -1,46 +1,27 @@
-# Phase 0 — Bootstrap & Dry-Run Foundation (Base)
+# Phase 0 — Complete
 
-**Goal**: Establish a green CI, core money primitives, RiskEngine, DecisionJournal, UniswapX poller, non-custodial wallet primitives, composition root, markout scaffolding, and a long-running dry-run harness. Zero capital at risk.
+Phase 0 delivered a **research-production** dry-run stack on Base.
 
-## Exit Criteria
+## Delivered
 
-- [x] Repository bootstrapped with strict CI (typecheck + test + secret scan)
-- [x] `@cavalre/core` Amount primitive (bigint only) + serialization helpers
-- [x] `@cavalre/risk-engine` with small-capital defaults and tests
-- [x] `@cavalre/journal` DecisionJournal (append-only, Amount-safe, JSONL)
-- [x] `@cavalre/uniswapx-base` Dutch order parser + poller interface (dry-run)
-- [x] `@cavalre/wallet` non-custodial signer + ERC-20 encoding (security-first)
-- [x] `@cavalre/runner` composition root (poller → risk → journal), dry-run default
-- [x] Markout / toxicity scaffolding (`computeMarkoutBps`, `makeMarkoutAnnotation`, journal fields)
-- [x] Long-running dry-run harness (`npm run dry-run`) writing JSONL under `journals/`
-- [ ] At least 7 days of continuous dry-run journal against live Base UniswapX open orders (operational)
-- [x] All tests green in CI on every push
+- Amount-safe core, RiskEngine, DecisionJournal  
+- Strategy: classify, Dutch decay, edge, toxicity, FillPolicy  
+- UniswapX Base poller + live API wire parse + QuoterV2 reference cost  
+- Non-custodial wallet package (Node; not browser)  
+- Compliant runner; live mode disabled  
+- Dry-run harness with JSONL + cycle heartbeats  
+- Shadow markout job  
+- Sentinel Desk (circuit, charts, book quality, wallet readiness)  
+- CI security + audit + tests  
+- TRUST / compliance / go-no-go documentation  
 
-## Capital
+## Not in Phase 0
 
-$0 at risk. No private keys required for dry-run. Live mode is explicitly disabled.
+- Live capital  
+- Priority trading policy  
+- Browser wallet connection  
 
-## FloatLib / Amount Rule
+## Next
 
-Every monetary value in the system is `Amount` (`bigint`).  
-Serialization uses decimal strings.  
-JavaScript `number` is never used for token amounts or notionals.
-
-## Dry-run harness
-
-```bash
-npm run dry-run
-# optional:
-npm run dry-run -- --interval 15 --limit 30 --dir journals
-```
-
-- Polls live UniswapX open orders on Base
-- Runs RiskEngine checks
-- Appends every decision to a timestamped JSONL file
-- Ctrl+C for graceful shutdown
-
-## Next (post Phase 0)
-
-1. Operate the harness and collect multi-day journals
-2. Analyze accept/reject rates and (when fills exist) markouts
-3. Only then consider tiny live probes with an external Signer
+Phase **0.5** = ops evidence (journals + markouts) toward [`GO_NO_GO.md`](GO_NO_GO.md).  
+See [`SCOPE_REVIEW.md`](SCOPE_REVIEW.md).
