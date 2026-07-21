@@ -1,183 +1,192 @@
 import { useEffect, useRef } from "react";
 
+export type ScopeSample = {
+  t: number;
+  raw: number;
+  accepted: number;
+  rejected: number;
+  waited: number;
+};
+
 /**
- * Amber CRT oscilloscope — traces journal activity as a live waveform.
+ * Signal-in-noise scope: continuous carrier (poll), bursts when raw>0.
+ * Not a boring line chart — phosphor beam + noise floor + waterfall.
  */
-export function Scope({
-  samples,
-}: {
-  samples: { raw: number; accepted: number; rejected: number }[];
-}) {
+export function Scope({ samples }: { samples: ScopeSample[] }) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    let raf = 0;
+    let alive = true;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    canvas.width = Math.floor(w * dpr);
-    canvas.height = Math.floor(h * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    // bezel / phosphor bg
-    ctx.fillStyle = "#080401";
-    ctx.fillRect(0, 0, w, h);
-
-    // grid
-    ctx.strokeStyle = "rgba(255,140,30,0.12)";
-    ctx.lineWidth = 1;
-    for (let x = 0; x < w; x += 20) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, h);
-      ctx.stroke();
-    }
-    for (let y = 0; y < h; y += 16) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
-    }
-
-    // center line
-    ctx.strokeStyle = "rgba(255,160,40,0.2)";
-    ctx.beginPath();
-    ctx.moveTo(0, h / 2);
-    ctx.lineTo(w, h / 2);
-    ctx.stroke();
-
-    if (samples.length < 2) {
-      // idle sine
-      ctx.strokeStyle = "rgba(255,176,0,0.35)";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      const t = Date.now() / 1000;
-      for (let i = 0; i < w; i++) {
-        const y =
-          h / 2 +
-          Math.sin(i * 0.04 + t * 2) * 8 +
-          Math.sin(i * 0.11 + t) * 3;
-        if (i === 0) ctx.moveTo(i, y);
-        else ctx.lineTo(i, y);
-      }
-      ctx.stroke();
-      return;
-    }
-
-    const maxRaw = Math.max(1, ...samples.map((s) => s.raw));
-    const n = samples.length;
-
-    const draw = (
-      key: "raw" | "accepted" | "rejected",
-      color: string,
-      scale: number
-    ) => {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.6;
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 6;
-      ctx.beginPath();
-      samples.forEach((s, i) => {
-        const x = (i / (n - 1)) * (w - 4) + 2;
-        const v = s[key] / scale;
-        const y = h - 6 - v * (h - 14);
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-    };
-
-    draw("raw", "rgba(255,176,0,0.9)", maxRaw);
-    draw("rejected", "rgba(255,80,40,0.75)", Math.max(1, maxRaw));
-    draw("accepted", "rgba(255,220,140,0.95)", Math.max(1, maxRaw));
-
-    // beam glow at latest point
-    const last = samples[samples.length - 1];
-    const lx = w - 4;
-    const ly = h - 6 - (last.raw / maxRaw) * (h - 14);
-    ctx.fillStyle = "rgba(255,200,80,0.9)";
-    ctx.beginPath();
-    ctx.arc(lx, ly, 2.5, 0, Math.PI * 2);
-    ctx.fill();
-  }, [samples]);
-
-  // idle redraw for sine
-  useEffect(() => {
-    if (samples.length >= 2) return;
-    const id = setInterval(() => {
-      const canvas = ref.current;
-      if (!canvas) return;
-      // trigger by resizing attribute noop — force via custom event
+    const paint = () => {
+      if (!alive) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      const ev = new Event("scope-tick");
-      canvas.dispatchEvent(ev);
-    }, 50);
-    return () => clearInterval(id);
-  }, [samples.length]);
 
-  useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas || samples.length >= 2) return;
-    const redraw = () => {
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const w = canvas.clientWidth;
-      const h = canvas.clientHeight;
-      canvas.width = Math.floor(w * dpr);
-      canvas.height = Math.floor(h * dpr);
+      const w = canvas.clientWidth || 600;
+      const h = canvas.clientHeight || 140;
+      if (canvas.width !== Math.floor(w * dpr)) {
+        canvas.width = Math.floor(w * dpr);
+        canvas.height = Math.floor(h * dpr);
+      }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.fillStyle = "#080401";
+
+      const now = performance.now() / 1000;
+
+      // CRT phosphor field
+      ctx.fillStyle = "#060301";
       ctx.fillRect(0, 0, w, h);
-      ctx.strokeStyle = "rgba(255,140,30,0.12)";
-      for (let x = 0; x < w; x += 20) {
+
+      // faint polar grid
+      ctx.strokeStyle = "rgba(255,140,30,0.08)";
+      ctx.lineWidth = 1;
+      for (let x = 0; x <= w; x += 24) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, h);
         ctx.stroke();
       }
-      ctx.strokeStyle = "rgba(255,176,0,0.4)";
-      ctx.lineWidth = 1.5;
-      ctx.shadowColor = "rgba(255,160,40,0.5)";
-      ctx.shadowBlur = 4;
-      ctx.beginPath();
-      const t = Date.now() / 1000;
-      for (let i = 0; i < w; i++) {
-        const y =
-          h / 2 +
-          Math.sin(i * 0.045 + t * 2.2) * 10 +
-          Math.sin(i * 0.12 + t * 1.1) * 4;
-        if (i === 0) ctx.moveTo(i, y);
-        else ctx.lineTo(i, y);
+      for (let y = 0; y <= h; y += 14) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
       }
+
+      const mid = h * 0.42;
+      const waveH = h * 0.28;
+      const waterY = h * 0.78;
+      const waterH = h * 0.18;
+
+      // --- carrier + noise (always) ---
+      ctx.beginPath();
+      for (let x = 0; x < w; x++) {
+        const n1 = Math.sin(x * 0.09 + now * 3.1);
+        const n2 = Math.sin(x * 0.23 - now * 1.7) * 0.45;
+        const n3 = Math.sin(x * 0.47 + now * 5.2) * 0.18;
+        // inject sample energy near the right edge of history
+        let burst = 0;
+        if (samples.length > 0) {
+          const idx = Math.floor((x / w) * samples.length);
+          const s = samples[Math.min(idx, samples.length - 1)];
+          burst = Math.min(3, s.raw) * 0.55 + s.accepted * 0.8 + s.rejected * 0.25;
+        }
+        const y = mid + (n1 + n2 + n3) * (6 + burst * 4) - burst * 10;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = "rgba(255,176,0,0.55)";
+      ctx.lineWidth = 1.4;
+      ctx.shadowColor = "rgba(255,160,40,0.55)";
+      ctx.shadowBlur = 8;
       ctx.stroke();
       ctx.shadowBlur = 0;
+
+      // secondary ghost beam (phase shifted)
+      ctx.beginPath();
+      for (let x = 0; x < w; x++) {
+        const n1 = Math.sin(x * 0.09 + now * 3.1 + 0.9);
+        const n2 = Math.sin(x * 0.19 - now * 2.0) * 0.4;
+        let burst = 0;
+        if (samples.length > 0) {
+          const idx = Math.floor((x / w) * samples.length);
+          const s = samples[Math.min(idx, samples.length - 1)];
+          burst = Math.min(2, s.raw) * 0.4;
+        }
+        const y = mid + waveH * 0.55 + (n1 + n2) * 4 - burst * 6;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = "rgba(255,100,30,0.35)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // trigger level
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = "rgba(255,180,60,0.25)";
+      ctx.beginPath();
+      ctx.moveTo(0, mid - 18);
+      ctx.lineTo(w, mid - 18);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(255,180,60,0.45)";
+      ctx.font = "9px monospace";
+      ctx.fillText("TRIG", 4, mid - 22);
+
+      // --- waterfall strip (history intensity) ---
+      const n = Math.max(samples.length, 1);
+      for (let i = 0; i < Math.min(n, 80); i++) {
+        const s = samples[samples.length - 1 - i] ?? {
+          raw: 0,
+          accepted: 0,
+          rejected: 0,
+        };
+        const intensity = Math.min(
+          1,
+          0.12 + s.raw * 0.35 + s.accepted * 0.5 + s.rejected * 0.15
+        );
+        const x = w - 4 - i * ((w - 8) / 80);
+        const barH = waterH * intensity;
+        ctx.fillStyle = `rgba(255, ${140 + s.accepted * 40}, 20, ${0.25 + intensity * 0.6})`;
+        ctx.fillRect(x, waterY + waterH - barH, Math.max(2, (w - 8) / 80 - 1), barH);
+      }
+      ctx.fillStyle = "rgba(255,160,40,0.4)";
+      ctx.fillText("WATERFALL · poll energy", 4, waterY - 4);
+
+      // status readout
+      const last = samples[samples.length - 1];
+      const mode =
+        !last || (last.raw === 0 && last.accepted === 0)
+          ? "CARRIER / NOISE FLOOR"
+          : last.raw > 0
+            ? `SIGNAL · raw=${last.raw}`
+            : "PATTERN";
+      ctx.fillStyle =
+        last && last.raw > 0
+          ? "rgba(255,220,120,0.95)"
+          : "rgba(255,160,40,0.55)";
+      ctx.font = "10px monospace";
+      ctx.fillText(mode, w - ctx.measureText(mode).width - 8, 14);
+
+      // beam tip
+      ctx.fillStyle = "rgba(255,230,160,0.95)";
+      ctx.shadowColor = "rgba(255,180,40,0.9)";
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(w - 6, mid, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      raf = requestAnimationFrame(paint);
     };
-    const id = setInterval(redraw, 40);
-    redraw();
-    return () => clearInterval(id);
-  }, [samples.length]);
+
+    raf = requestAnimationFrame(paint);
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+    };
+  }, [samples]);
+
+  const last = samples[samples.length - 1];
+  const signal = last && last.raw > 0;
 
   return (
-    <div className="scope-panel panel-rise">
-      <h2>Oscilloscope · market / decision bus</h2>
+    <div className={`scope-panel panel-rise${signal ? " scope-hot" : ""}`}>
+      <div className="scope-head">
+        <h2>Scope · signal in noise</h2>
+        <span className="scope-mode">
+          {signal ? `BURST raw=${last!.raw}` : "listening · UniswapX Dutch_V3"}
+        </span>
+      </div>
       <canvas ref={ref} className="scope-canvas" />
       <div className="scope-legend">
-        <span>
-          <i style={{ background: "#ffb000" }} /> raw
-        </span>
-        <span>
-          <i style={{ background: "#ff5030" }} /> reject
-        </span>
-        <span>
-          <i style={{ background: "#ffdc8c" }} /> accept
-        </span>
+        <span>carrier = poll clock</span>
+        <span>burst = open orders</span>
+        <span>waterfall = recent energy</span>
       </div>
     </div>
   );

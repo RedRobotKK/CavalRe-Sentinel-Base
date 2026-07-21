@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getLatest, getMeta, getJournalFiles } from "./api";
 import { Circuit } from "./Circuit";
 import { ShaderBackdrop } from "./gl/ShaderBackdrop";
 import { CircuitThree } from "./gl/CircuitThree";
-import { Scope } from "./Scope";
+import { Scope, type ScopeSample } from "./Scope";
+import { LiveFeed } from "./LiveFeed";
 
 type RecordRow = {
   seq?: number;
@@ -23,9 +24,7 @@ export function App() {
   const [clock, setClock] = useState(() => new Date().toISOString().slice(11, 19));
   const [prevCount, setPrevCount] = useState(0);
   const [pulseKey, setPulseKey] = useState(0);
-  const [scopeSamples, setScopeSamples] = useState<
-    { raw: number; accepted: number; rejected: number }[]
-  >([]);
+  const [scopeSamples, setScopeSamples] = useState<ScopeSample[]>([]);
 
   const refresh = useCallback(async () => {
     try {
@@ -42,16 +41,15 @@ export function App() {
       setFiles(f.files ?? []);
       setErr(null);
 
-      // scope sample from latest heartbeats / summary
       const recs: RecordRow[] = l?.records ?? [];
-      const hearts = recs.filter((r) => r.reason === "cycle_heartbeat").slice(-1)[0];
+      const hearts = [...recs].reverse().find((r) => r.reason === "cycle_heartbeat");
       const raw = Number(hearts?.context?.raw ?? 0);
-      const accepted = Number(hearts?.context?.accepted ?? l?.summary?.accepts ?? 0);
-      const rejected = Number(hearts?.context?.rejected ?? l?.summary?.rejects ?? 0);
-      setScopeSamples((s) => {
-        const next = [...s, { raw, accepted, rejected }];
-        return next.slice(-80);
-      });
+      const accepted = Number(hearts?.context?.accepted ?? 0);
+      const rejected = Number(hearts?.context?.rejected ?? 0);
+      const waited = Number(hearts?.context?.waited ?? 0);
+      setScopeSamples((s) =>
+        [...s, { t: Date.now(), raw, accepted, rejected, waited }].slice(-100)
+      );
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -76,9 +74,8 @@ export function App() {
   const summary = latest?.summary;
   const book = summary?.book;
   const records: RecordRow[] = latest?.records ?? [];
-  const newestFirst = useMemo(() => [...records].reverse().slice(0, 80), [records]);
   const go = meta?.goNoGo;
-  const activity = Math.min(1, (summary?.n ?? 0) / 60);
+  const activity = Math.min(1, (summary?.n ?? 0) / 60 + (scopeSamples.at(-1)?.raw ?? 0) * 0.3);
 
   return (
     <div className="layout">
@@ -87,18 +84,16 @@ export function App() {
       <header className="topbar panel-rise">
         <div>
           <div className="brand">
-            SENTINEL <span>WYSE-26</span> // BASE
+            CAVALRE <span>SENTINEL</span> // BASE
           </div>
-          <div className="muted">
-            AMBER TERMINAL · CIRCUIT · SCOPE · LIVE POLL
-          </div>
+          <div className="muted">RESEARCH TERMINAL · CIRCUIT · SCOPE · STREAM</div>
         </div>
         <div className="pills">
           <span className="hud-clock">{clock}Z</span>
           <span className={`pill ${go?.verdict === "NO_GO" ? "off" : "on"}`}>
             {go?.verdict ?? "…"}
           </span>
-          <span className="pill on live-blip">{meta?.network ?? "…"}</span>
+          <span className="pill on live-blip">{meta?.network ?? "base"}</span>
           <span className="pill">{meta?.orderType ?? "Dutch_V3"}</span>
           <span className="pill on">LIVE CAPITAL OFF</span>
           <button type="button" onClick={() => refresh()}>
@@ -110,7 +105,7 @@ export function App() {
       <div className="main-col">
         {err && (
           <div className="panel bad">
-            LINK ERROR: {err} — start desk-api :8787
+            LINK ERROR: {err} — desk-api :8787
           </div>
         )}
 
@@ -120,41 +115,7 @@ export function App() {
         </div>
 
         <Scope samples={scopeSamples} />
-
-        <div className="feed-panel panel-rise">
-          <h2>
-            Live data feed · source journals/ · poll #{tick}
-            <span className="cursor-blink" />
-          </h2>
-          <div className="feed-scroll">
-            {newestFirst.length === 0 && (
-              <div className="feed-line info">
-                <span className="ts">--:--:--</span> waiting for heartbeat from
-                dry-run harness…
-              </div>
-            )}
-            {newestFirst.map((r, i) => {
-              const action =
-                (r.context?.policyAction as string) ??
-                (r.kind === "quote_accepted"
-                  ? "accept"
-                  : r.kind === "markout"
-                    ? "markout"
-                    : r.kind === "info"
-                      ? "info"
-                      : "reject");
-              return (
-                <div key={`${r.seq}-${i}`} className={`feed-line ${action}`}>
-                  <span className="ts">{r.ts?.slice(11, 19) ?? "--:--:--"}</span>{" "}
-                  [{action.padEnd(7)}] {(r.reason ?? "").slice(0, 48)}
-                  {r.context?.raw != null ? ` raw=${r.context.raw}` : ""}
-                  {r.context?.edgeBps != null ? ` edge=${r.context.edgeBps}` : ""}
-                  {r.ref ? ` ${String(r.ref).slice(0, 12)}` : ""}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <LiveFeed records={records} tick={tick} />
       </div>
 
       <div className="side-col">
@@ -191,7 +152,7 @@ export function App() {
             <span>{summary?.n ?? 0}</span>
           </div>
           <div className="metric-row">
-            <span>accept / reject / wait</span>
+            <span>A / R / W</span>
             <span>
               {summary?.accepts ?? 0}/{summary?.rejects ?? 0}/{summary?.waits ?? 0}
             </span>
@@ -210,7 +171,7 @@ export function App() {
         </div>
 
         <div className="panel panel-rise">
-          <h2>Risk limits</h2>
+          <h2>Risk</h2>
           {meta?.risk &&
             Object.entries(meta.risk).map(([k, v]) => (
               <div className="metric-row" key={k}>
@@ -221,32 +182,15 @@ export function App() {
         </div>
 
         <div className="panel panel-rise">
-          <h2>Journal files</h2>
+          <h2>Journals</h2>
           <ul className="clean">
-            {files.slice(0, 6).map((f) => (
+            {files.slice(0, 5).map((f) => (
               <li key={f.name}>
                 {f.name}
                 <div className="muted">{f.bytes} B</div>
               </li>
             ))}
-            {files.length === 0 && <li className="muted">none yet</li>}
           </ul>
-        </div>
-
-        <div className="panel panel-rise">
-          <h2>Link</h2>
-          <div className="metric-row">
-            <span>api</span>
-            <span className="good">:8787</span>
-          </div>
-          <div className="metric-row">
-            <span>chain</span>
-            <span>{meta?.chainId ?? 8453}</span>
-          </div>
-          <div className="metric-row">
-            <span>signing</span>
-            <span className="good">OFF</span>
-          </div>
         </div>
       </div>
     </div>
