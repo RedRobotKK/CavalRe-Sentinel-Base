@@ -5,14 +5,18 @@
   "description": "Capital-safety-first UniswapX filler and autonomous system on Base",
   "workspaces": [
     "packages/*",
-    "src/*"
+    "src/*",
+    "apps/*"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:watch": "npm run test:watch --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
-    "dry-run": "tsx scripts/dry-run-harness.mjs"
+    "dry-run": "tsx scripts/dry-run-harness.mjs",
+    "desk:api": "node scripts/desk-api.mjs",
+    "desk:web": "npm run dev -w @cavalre/desk",
+    "desk": "node scripts/desk-api.mjs & npm run dev -w @cavalre/desk"
   },
   "devDependencies": {
     "tsx": "^4.19.0"
