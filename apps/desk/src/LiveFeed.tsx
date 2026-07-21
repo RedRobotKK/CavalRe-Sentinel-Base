@@ -9,9 +9,6 @@ type Row = {
   context?: Record<string, string | boolean | null>;
 };
 
-/**
- * Collapse heartbeat spam into carrier lines; surface signal events.
- */
 export function LiveFeed({
   records,
   tick,
@@ -24,14 +21,14 @@ export function LiveFeed({
   return (
     <div className="feed-panel panel-rise">
       <h2>
-        On-stream · UniswapX Base poll
+        On-stream · UniswapX Base
         <span className="cursor-blink" />
-        <span className="feed-meta"> cycle {tick}</span>
+        <span className="feed-meta">poll {tick}</span>
       </h2>
       <div className="feed-scroll">
         {lines.length === 0 && (
           <div className="feed-line info">
-            <span className="ts">--:--:--</span> no carrier yet — start dry-run
+            <span className="ts">--:--:--</span> no carrier — start dry-run or simulate
           </div>
         )}
         {lines.map((ln, i) => (
@@ -48,63 +45,89 @@ function buildLines(records: Row[]) {
   const newest = [...records].reverse();
   const out: { ts: string; text: string; cls: string }[] = [];
 
-  let carrierRun = 0;
-  let carrierTs = "";
-  let lastRaw = "0";
+  let quietRun = 0;
+  let quietTs = "";
+  let signalRun = 0;
+  let signalTs = "";
+  let signalRaw = "0";
+  let signalAcc = "0";
+  let signalRej = "0";
 
-  const flushCarrier = () => {
-    if (carrierRun === 0) return;
+  const flushQuiet = () => {
+    if (quietRun === 0) return;
     out.push({
-      ts: carrierTs,
+      ts: quietTs,
       cls: "info",
       text:
-        carrierRun === 1
-          ? `carrier · heartbeat · raw=${lastRaw} · book quiet`
-          : `carrier · ${carrierRun} polls · raw=${lastRaw} · noise floor (no open Dutch_V3)`,
+        quietRun === 1
+          ? "carrier · 1 poll · book empty"
+          : `carrier · ${quietRun} polls · book empty (noise floor)`,
     });
-    carrierRun = 0;
+    quietRun = 0;
+  };
+
+  const flushSignal = () => {
+    if (signalRun === 0) return;
+    out.push({
+      ts: signalTs,
+      cls: "accept",
+      text:
+        signalRun === 1
+          ? `SIGNAL · open orders raw=${signalRaw} A/R=${signalAcc}/${signalRej}`
+          : `SIGNAL · ${signalRun} polls with book · last raw=${signalRaw} A/R=${signalAcc}/${signalRej}`,
+    });
+    signalRun = 0;
   };
 
   for (const r of newest) {
     const ts = r.ts?.slice(11, 19) ?? "--:--:--";
-    const isHb = r.reason === "cycle_heartbeat" || r.context?.stage === "poll";
+    const isHb = r.reason === "cycle_heartbeat";
 
-    if (isHb && r.kind === "info") {
+    if (isHb) {
       const raw = String(r.context?.raw ?? "0");
-      lastRaw = raw;
-      if (raw !== "0") {
-        flushCarrier();
-        out.push({
-          ts,
-          cls: "accept",
-          text: `SIGNAL · open orders raw=${raw} acc=${r.context?.accepted ?? 0} rej=${r.context?.rejected ?? 0} wait=${r.context?.waited ?? 0}`,
-        });
+      const acc = String(r.context?.accepted ?? "0");
+      const rej = String(r.context?.rejected ?? "0");
+      if (raw === "0") {
+        flushSignal();
+        if (quietRun === 0) quietTs = ts;
+        quietRun += 1;
       } else {
-        if (carrierRun === 0) carrierTs = ts;
-        carrierRun += 1;
+        flushQuiet();
+        if (signalRun === 0) signalTs = ts;
+        signalRun += 1;
+        signalRaw = raw;
+        signalAcc = acc;
+        signalRej = rej;
       }
       continue;
     }
 
-    flushCarrier();
+    flushQuiet();
+    flushSignal();
 
     if (r.kind === "quote_accepted") {
       out.push({
         ts,
         cls: "accept",
-        text: `ACCEPT · edge=${r.context?.edgeBps ?? "?"} class=${r.context?.orderClass ?? "?"} ${(r.ref ?? "").slice(0, 14)}`,
+        text: `ACCEPT · edge=${r.context?.edgeBps ?? "?"}bps · ${r.context?.orderClass ?? "?"} · ${(r.ref ?? "").slice(0, 14)}`,
       });
     } else if (r.kind === "quote_rejected") {
       out.push({
         ts,
         cls: "reject",
-        text: `REJECT · ${(r.reason ?? "").slice(0, 40)} ${(r.ref ?? "").slice(0, 12)}`,
+        text: `REJECT · ${(r.reason ?? "").slice(0, 56)} · ${(r.ref ?? "").slice(0, 12)}`,
       });
     } else if (r.kind === "markout") {
       out.push({
         ts,
         cls: "markout",
-        text: `MARKOUT · ${r.context?.markoutBps ?? r.reason ?? ""} bps · win=${String(Number(r.context?.markoutBps ?? 0) >= 0)}`,
+        text: `MARKOUT · ${r.context?.markoutBps ?? "?"}bps · ${(r.ref ?? "").slice(0, 12)}`,
+      });
+    } else if (r.kind === "info") {
+      out.push({
+        ts,
+        cls: "wait",
+        text: `WAIT · ${(r.reason ?? "").slice(0, 52)}`,
       });
     } else {
       out.push({
@@ -114,6 +137,8 @@ function buildLines(records: Row[]) {
       });
     }
   }
-  flushCarrier();
-  return out.slice(0, 60);
+
+  flushQuiet();
+  flushSignal();
+  return out.slice(0, 80);
 }

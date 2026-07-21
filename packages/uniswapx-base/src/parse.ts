@@ -2,6 +2,25 @@ import { toAmount, type Amount } from "@cavalre/core";
 import type { WireOrder, ParsedOrder, ParseResult } from "./types.js";
 import { BASE_CHAIN_ID } from "./constants.js";
 
+function readAmount(field: string, value: unknown): Amount {
+  if (value === undefined || value === null) {
+    throw new Error(`missing_${field}`);
+  }
+  if (
+    typeof value !== "string" &&
+    typeof value !== "number" &&
+    typeof value !== "bigint"
+  ) {
+    throw new Error(`bad_type_${field}:${typeof value}`);
+  }
+  try {
+    return toAmount(value);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`${field}:${msg}`);
+  }
+}
+
 /**
  * Parse UniswapX wire order (live API shape).
  * Fail-closed. All sizes → Amount (bigint).
@@ -54,14 +73,14 @@ export function parseOrder(raw: unknown, options?: { chainId?: number }): ParseR
   let outputEnd: Amount;
 
   try {
-    inputStart = toAmount(w.input.startAmount);
-    inputEnd = toAmount(w.input.endAmount);
-    outputStart = toAmount(out0.startAmount);
-    outputEnd = toAmount(out0.endAmount);
-  } catch {
+    inputStart = readAmount("input.startAmount", w.input.startAmount);
+    inputEnd = readAmount("input.endAmount", w.input.endAmount);
+    outputStart = readAmount("output.startAmount", out0.startAmount);
+    outputEnd = readAmount("output.endAmount", out0.endAmount);
+  } catch (e) {
     return {
       ok: false,
-      reason: "invalid_amount_string",
+      reason: e instanceof Error ? e.message : "invalid_amount",
       orderHash: w.orderHash,
     };
   }
