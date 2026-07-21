@@ -87,11 +87,15 @@ describe("Amount (core money primitive)", () => {
   });
 
   describe("serialization (journal safety)", () => {
-    it("amountToString preserves full precision", () => {
-      const big = toAmount("9007199254740993"); // > Number.MAX_SAFE_INTEGER
-      expect(amountToString(big)).toBe("9007199254740993");
-      // Prove Number would have lost precision
-      expect(Number(big.toString())).not.toBe(9007199254740993);
+    it("amountToString preserves full precision beyond MAX_SAFE_INTEGER", () => {
+      // Use a string so the JS parser never touches the value as a Number literal.
+      const raw = "9007199254740993";
+      const big = toAmount(raw);
+      expect(amountToString(big)).toBe(raw);
+
+      // Number() loses precision on this value.
+      const asNumber = Number(raw);
+      expect(String(asNumber)).not.toBe(raw);
     });
 
     it("amountFromString round-trips", () => {

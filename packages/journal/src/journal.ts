@@ -26,6 +26,7 @@ export interface AppendInput {
  * - All money fields are Amount (bigint).
  * - Serialization uses decimal strings so precision is never lost.
  * - seq is assigned by the journal (monotonic).
+ * - all() returns a shallow copy (true snapshot).
  */
 export class DecisionJournal {
   private readonly records: DecisionRecord[] = [];
@@ -47,9 +48,9 @@ export class DecisionJournal {
     return record;
   }
 
-  /** Return a snapshot of all records (newest last). */
+  /** Return a snapshot of all records (newest last). Copy, not live reference. */
   all(): readonly DecisionRecord[] {
-    return this.records;
+    return this.records.slice();
   }
 
   /** Number of records currently held. */

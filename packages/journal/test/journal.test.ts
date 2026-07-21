@@ -50,7 +50,9 @@ describe("DecisionJournal", () => {
   });
 
   it("serializes Amounts as decimal strings (never number)", () => {
-    const big = toAmount("9007199254740993"); // beyond MAX_SAFE_INTEGER
+    // Use string form so the test itself never introduces a Number literal.
+    const raw = "9007199254740993";
+    const big = toAmount(raw);
     journal.append({
       kind: "fill",
       amount: big,
@@ -62,11 +64,11 @@ describe("DecisionJournal", () => {
 
     // Must be strings in the wire format
     expect(typeof parsed.amount).toBe("string");
-    expect(parsed.amount).toBe("9007199254740993");
+    expect(parsed.amount).toBe(raw);
     expect(parsed.amount2).toBe("42");
 
-    // Prove we did not go through Number
-    expect(Number(parsed.amount)).not.toBe(9007199254740993);
+    // Number() loses precision on this value
+    expect(String(Number(raw))).not.toBe(raw);
   });
 
   it("round-trips through JSONL preserving Amount precision", () => {
