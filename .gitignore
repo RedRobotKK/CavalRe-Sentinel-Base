@@ -34,6 +34,7 @@ npm-debug.log*
 data/
 journals/
 *.jsonl
+reports/
 
 # Misc
 .cache/
