@@ -1,10 +1,8 @@
 :root {
   color-scheme: dark;
   --bg: #07090d;
-  --panel: #0d1118;
-  --panel2: #10151e;
+  --panel: rgba(13, 17, 24, 0.82);
   --border: #1a2230;
-  --border-hot: #3d5a80;
   --text: #e8edf5;
   --muted: #7d8799;
   --accent: #5b9dff;
@@ -26,25 +24,20 @@ body,
 #root {
   margin: 0;
   min-height: 100%;
-  background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(91, 157, 255, 0.08), transparent),
-    radial-gradient(900px 500px at 90% 0%, rgba(0, 229, 192, 0.05), transparent),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family: var(--sans);
   font-size: 13px;
 }
 
-body::before {
-  content: "";
-  pointer-events: none;
+/* WebGL default backdrop */
+.shader-backdrop {
   position: fixed;
   inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
-  background-size: 24px 24px;
+  width: 100%;
+  height: 100%;
   z-index: 0;
+  pointer-events: none;
 }
 
 #root {
@@ -60,12 +53,13 @@ button {
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 5px 12px;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 
 button:hover {
   border-color: var(--accent);
   box-shadow: 0 0 12px var(--glow);
+  transform: translateY(-1px);
 }
 
 .layout {
@@ -74,6 +68,23 @@ button:hover {
   gap: 10px;
   padding: 12px;
   min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+.panel-rise {
+  animation: panelRise 0.55s ease-out both;
+}
+
+@keyframes panelRise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .topbar {
@@ -82,9 +93,10 @@ button:hover {
   justify-content: space-between;
   gap: 12px;
   border: 1px solid var(--border);
-  background: linear-gradient(180deg, #121821, var(--panel));
+  background: linear-gradient(180deg, rgba(18, 24, 33, 0.92), var(--panel));
   padding: 10px 14px;
   border-radius: 8px;
+  backdrop-filter: blur(10px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
@@ -141,14 +153,39 @@ button:hover {
   }
 }
 
-/* Circuit */
+/* Circuit shell: Three under SVG */
+.circuit-shell {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.circuit-three {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.circuit-three-canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
 .circuit-panel {
   position: relative;
-  background: linear-gradient(180deg, #0f141c, var(--panel));
+  z-index: 1;
+  background: linear-gradient(
+    180deg,
+    rgba(15, 20, 28, 0.55),
+    rgba(13, 17, 24, 0.72)
+  );
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px 14px 8px;
   overflow: hidden;
+  backdrop-filter: blur(6px);
 }
 
 .circuit-panel::after {
@@ -159,17 +196,11 @@ button:hover {
   background: linear-gradient(
     100deg,
     transparent 40%,
-    rgba(91, 157, 255, 0.03) 50%,
+    rgba(91, 157, 255, 0.04) 50%,
     transparent 60%
   );
   background-size: 200% 100%;
   animation: scan 7s linear infinite;
-  opacity: 0.7;
-}
-
-.circuit-panel.has-data::after {
-  animation-duration: 4.5s;
-  opacity: 1;
 }
 
 @keyframes scan {
@@ -206,7 +237,6 @@ button:hover {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--muted);
-  letter-spacing: 0.04em;
 }
 
 .circuit-live-dot {
@@ -239,13 +269,9 @@ button:hover {
 }
 
 .circuit-bus {
-  stroke: url(#wireGrad);
+  stroke: #2a4060;
   stroke-width: 3;
-  opacity: 0.45;
-}
-
-.circuit-node {
-  transition: filter 0.25s;
+  opacity: 0.35;
 }
 
 .circuit-node.hot {
@@ -263,7 +289,7 @@ button:hover {
 }
 
 .circuit-node rect {
-  fill: #121a26;
+  fill: rgba(18, 26, 38, 0.92);
   stroke: #2a3548;
   stroke-width: 1.5;
   transition: stroke 0.25s, fill 0.25s;
@@ -271,7 +297,7 @@ button:hover {
 
 .circuit-node.hot rect {
   stroke: var(--accent2);
-  fill: #0f2430;
+  fill: rgba(15, 36, 48, 0.95);
 }
 
 .circuit-node text {
@@ -279,7 +305,6 @@ button:hover {
   font-family: var(--mono);
   font-size: 10px;
   text-anchor: middle;
-  transition: fill 0.2s;
 }
 
 .circuit-node.hot text {
@@ -308,7 +333,6 @@ button:hover {
   stroke: #243044;
   stroke-width: 2;
   fill: none;
-  stroke-linecap: round;
 }
 
 .circuit-wire.active {
@@ -360,7 +384,7 @@ button:hover {
   padding: 2px 8px;
   border-radius: 4px;
   border: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(0, 0, 0, 0.35);
   animation: slidein 0.35s ease-out;
 }
 
@@ -401,12 +425,19 @@ button:hover {
 }
 
 .panel {
-  background: linear-gradient(180deg, #10161f, var(--panel));
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
   min-height: 120px;
+  backdrop-filter: blur(10px);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.panel:hover {
+  border-color: #2a3548;
+  box-shadow: 0 0 20px rgba(91, 157, 255, 0.06);
 }
 
 .panel h2 {
@@ -465,11 +496,12 @@ button:hover {
 
 .side,
 .table-wrap {
-  background: linear-gradient(180deg, #10161f, var(--panel));
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
   overflow: auto;
+  backdrop-filter: blur(10px);
 }
 
 table {
@@ -493,7 +525,7 @@ th {
   font-weight: 600;
   position: sticky;
   top: 0;
-  background: var(--panel);
+  background: rgba(13, 17, 24, 0.95);
 }
 
 tr.flash {
