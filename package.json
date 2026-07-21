@@ -12,7 +12,10 @@
     "test": "npm run test --workspaces --if-present",
     "test:watch": "npm run test:watch --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
-    "dry-run": "node scripts/dry-run-harness.mjs"
+    "dry-run": "tsx scripts/dry-run-harness.mjs"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
   },
   "engines": {
     "node": ">=22"
