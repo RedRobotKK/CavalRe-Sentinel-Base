@@ -19,8 +19,15 @@ export interface ReferenceCostOptions {
   fetchFn?: typeof fetch;
 }
 
+function readBaseRpcFromEnv(): string | undefined {
+  const g = globalThis as {
+    process?: { env?: Record<string, string | undefined> };
+  };
+  return g.process?.env?.BASE_RPC_URL;
+}
+
 export function createUniswapV3ReferenceCost(options: ReferenceCostOptions = {}) {
-  const rpcUrl = options.rpcUrl ?? process.env.BASE_RPC_URL ?? DEFAULT_BASE_RPC;
+  const rpcUrl = options.rpcUrl ?? readBaseRpcFromEnv() ?? DEFAULT_BASE_RPC;
   const fetchFn = options.fetchFn ?? fetch;
 
   return async function referenceCost(
@@ -59,10 +66,7 @@ async function quoteExactInputSingle(
     fee: number;
   }
 ): Promise<Amount> {
-  // quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96))
-  // selector = first 4 bytes of keccak256 of the signature
   const selector = "c6a5026a";
-  // ABI: one tuple arg → offset (0x20) then five static words
   const data =
     "0x" +
     selector +
