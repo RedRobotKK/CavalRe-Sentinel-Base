@@ -111,21 +111,37 @@ export async function runCycle(
     let refOutput = 0n;
     let edgeUndefined = true;
     let edgeBps = 0;
+    let quoteErr: string | null = null;
+
     if (config.referenceCostFn) {
-      refOutput = await config.referenceCostFn(order, resolved.input);
-      const edge = computeEdgeBps({
-        resolvedOutput: resolved.output,
-        refOutput,
-      });
-      edgeBps = edge.edgeBps;
-      edgeUndefined = edge.undefined;
+      try {
+        refOutput = await config.referenceCostFn(order, resolved.input);
+        const edge = computeEdgeBps({
+          resolvedOutput: resolved.output,
+          refOutput,
+        });
+        edgeBps = edge.edgeBps;
+        edgeUndefined = edge.undefined;
+        if (edgeUndefined) {
+          quoteErr =
+            (config.referenceCostFn as { lastError?: string }).lastError ??
+            "ref_output_zero";
+        }
+      } catch (e) {
+        quoteErr = e instanceof Error ? e.message.slice(0, 80) : "quote_throw";
+        edgeUndefined = true;
+      }
+    } else {
+      quoteErr = "no_referenceCostFn";
     }
 
     if (edgeUndefined) {
       rejected += 1;
       deps.journal.append({
         kind: "quote_rejected",
-        reason: "edge_undefined_no_reference_cost",
+        reason: quoteErr
+          ? `edge_undefined:${quoteErr}`.slice(0, 120)
+          : "edge_undefined_no_reference_cost",
         ref: order.orderHash,
         amount: resolved.input,
         context: featureContext({
