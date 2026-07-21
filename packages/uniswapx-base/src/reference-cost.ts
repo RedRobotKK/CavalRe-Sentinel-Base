@@ -16,13 +16,9 @@ import {
 
 export interface ReferenceCostOptions {
   rpcUrl?: string;
-  /** Optional fetch override (tests). */
   fetchFn?: typeof fetch;
 }
 
-/**
- * Build referenceCostFn for runCycle against Base mainnet QuoterV2.
- */
 export function createUniswapV3ReferenceCost(options: ReferenceCostOptions = {}) {
   const rpcUrl = options.rpcUrl ?? process.env.BASE_RPC_URL ?? DEFAULT_BASE_RPC;
   const fetchFn = options.fetchFn ?? fetch;
@@ -45,7 +41,7 @@ export function createUniswapV3ReferenceCost(options: ReferenceCostOptions = {})
         });
         if (out > best) best = out;
       } catch {
-        // tier missing or revert — try next
+        // tier missing or revert
       }
     }
 
@@ -63,17 +59,19 @@ async function quoteExactInputSingle(
     fee: number;
   }
 ): Promise<Amount> {
-  // quoteExactInputSingle((address,address,uint256,uint24,uint160))
-  // selector 0xc6a5026a (QuoterV2)
+  // quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96))
+  // selector = first 4 bytes of keccak256 of the signature
   const selector = "c6a5026a";
+  // ABI: one tuple arg → offset (0x20) then five static words
   const data =
     "0x" +
     selector +
+    encodeUint256(32n) +
     encodeAddress(p.tokenIn) +
     encodeAddress(p.tokenOut) +
     encodeUint256(p.amountIn) +
-    encodeUint24(p.fee) +
-    encodeUint160(0n);
+    encodeUint256(BigInt(p.fee)) +
+    encodeUint256(0n);
 
   const body = {
     jsonrpc: "2.0",
@@ -92,31 +90,23 @@ async function quoteExactInputSingle(
     throw new Error(`rpc_http_${res.status}`);
   }
 
-  const json = (await res.json()) as { result?: string; error?: { message: string } };
+  const json = (await res.json()) as {
+    result?: string;
+    error?: { message: string };
+  };
   if (json.error || !json.result || json.result === "0x") {
     throw new Error(json.error?.message ?? "quote_empty");
   }
 
-  // amountOut is first 32-byte word
   const hex = json.result.slice(2);
   if (hex.length < 64) throw new Error("quote_short");
   return BigInt("0x" + hex.slice(0, 64));
 }
 
 function encodeAddress(addr: string): string {
-  const a = addr.toLowerCase().replace(/^0x/, "");
-  return a.padStart(64, "0");
+  return addr.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 }
 
 function encodeUint256(n: bigint): string {
-  return n.toString(16).padStart(64, "0");
-}
-
-function encodeUint24(n: number): string {
-  // uint24 in ABI is still 32-byte word
-  return n.toString(16).padStart(64, "0");
-}
-
-function encodeUint160(n: bigint): string {
   return n.toString(16).padStart(64, "0");
 }
