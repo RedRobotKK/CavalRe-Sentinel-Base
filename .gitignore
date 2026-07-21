@@ -35,6 +35,7 @@ data/
 journals/
 *.jsonl
 reports/
+run/
 
 # Misc
 .cache/

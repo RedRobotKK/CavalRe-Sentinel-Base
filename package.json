@@ -20,6 +20,9 @@
     "desk:api": "node scripts/desk-api.mjs",
     "desk:web": "npm run dev -w @cavalre/desk",
     "desk": "node scripts/desk-api.mjs & npm run dev -w @cavalre/desk",
+    "stack": "bash scripts/stack-start.sh",
+    "stack:stop": "bash scripts/stack-stop.sh",
+    "stack:tabs": "bash scripts/stack-tabs.macos.sh",
     "audit:high": "npm audit --audit-level=high"
   },
   "devDependencies": {
