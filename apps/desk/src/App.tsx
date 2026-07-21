@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getLatest, getMeta, getJournalFiles } from "./api";
 import {
   FunnelChart,
@@ -7,6 +7,7 @@ import {
   TimelineChart,
   ReasonBars,
 } from "./charts";
+import { Circuit } from "./Circuit";
 
 type RecordRow = {
   seq?: number;
@@ -25,6 +26,9 @@ export function App() {
   const [files, setFiles] = useState<any[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  const [clock, setClock] = useState(() => new Date().toISOString().slice(11, 19));
+  const [prevCount, setPrevCount] = useState(0);
+  const [pulseKey, setPulseKey] = useState(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -33,6 +37,11 @@ export function App() {
         getLatest(500),
         getJournalFiles(),
       ]);
+      const n = l?.records?.length ?? 0;
+      if (n > prevCount) {
+        setPulseKey((k) => k + 1);
+      }
+      setPrevCount(n);
       setMeta(m);
       setLatest(l);
       setFiles(f.files ?? []);
@@ -40,32 +49,42 @@ export function App() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
-  }, []);
+  }, [prevCount]);
 
   useEffect(() => {
     refresh();
     const id = setInterval(() => {
       setTick((t) => t + 1);
       refresh();
-    }, 5000);
+    }, 3000);
     return () => clearInterval(id);
   }, [refresh]);
 
+  useEffect(() => {
+    const id = setInterval(() => {
+      setClock(new Date().toISOString().slice(11, 19));
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
   const summary = latest?.summary;
   const records: RecordRow[] = latest?.records ?? [];
-  const newestFirst = [...records].reverse();
+  const newestFirst = useMemo(() => [...records].reverse(), [records]);
 
   return (
     <div className="layout">
       <header className="topbar">
         <div>
-          <div className="brand">CavalRe Sentinel Desk</div>
+          <div className="brand">
+            CAVALRE <span>SENTINEL</span> DESK
+          </div>
           <div className="muted">
-            Visual research book · every decision inspectable · live capital off
+            Quant research book · circuit visibility · markout-ready journal
           </div>
         </div>
         <div className="pills">
-          <span className="pill on">{meta?.network ?? "…"}</span>
+          <span className="hud-clock">{clock}Z</span>
+          <span className="pill on live-blip">{meta?.network ?? "…"}</span>
           <span className="pill">chain {meta?.chainId ?? "…"}</span>
           <span className="pill">{meta?.orderType ?? "…"}</span>
           <span className="pill on">{meta?.posture ?? "dry-run"}</span>
@@ -83,6 +102,8 @@ export function App() {
           API error: {err}. Run <code>npm run desk:api</code> on :8787.
         </div>
       )}
+
+      <Circuit records={records} pulseKey={pulseKey} />
 
       <section className="grid">
         <div className="panel">
@@ -168,12 +189,12 @@ export function App() {
             {files.length === 0 && <li className="muted">No jsonl yet</li>}
           </ul>
           <div className="muted" style={{ marginTop: 12 }}>
-            poll #{tick} · auto 5s
+            poll #{tick} · 3s · circuit pulses on new rows
           </div>
         </aside>
 
         <div className="table-wrap">
-          <h2>Decisions (newest first) — full feature rows</h2>
+          <h2>Decision tape (newest first)</h2>
           <table>
             <thead>
               <tr>
@@ -199,7 +220,7 @@ export function App() {
                       ? "wait"
                       : "reject");
                 return (
-                  <tr key={`${r.seq}-${i}`}>
+                  <tr key={`${r.seq}-${i}`} className={i < 3 ? "flash" : undefined}>
                     <td>{r.ts?.slice(11, 19) ?? ""}</td>
                     <td>
                       <span className={`tag ${action}`}>{action}</span>
@@ -218,7 +239,8 @@ export function App() {
               {newestFirst.length === 0 && (
                 <tr>
                   <td colSpan={10} className="muted">
-                    Empty book — charts stay flat until dry-run writes decisions.
+                    Idle circuit — empty Base Dutch_V3 book is valid. Stream lights up when
+                    harness writes decisions.
                   </td>
                 </tr>
               )}
