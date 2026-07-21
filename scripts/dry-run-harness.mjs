@@ -1,13 +1,6 @@
 #!/usr/bin/env node
 /**
- * VIEW mode harness — Base MAINNET real sources, no signing.
- *
- * Sources:
- *   - UniswapX open Dutch_V3 orders (HTTPS)
- *   - Base RPC QuoterV2 eth_call (reference cost)
- *
- * Write mode requires wallet credentials + future live path (not here).
- * Simulations: use `npm run simulate` separately; same decision path.
+ * VIEW mode — open channel on UniswapX + Base RPC. No signing.
  */
 
 import { mkdir, appendFile } from "node:fs/promises";
@@ -29,7 +22,7 @@ function flag(name, fallback) {
   return args[i + 1];
 }
 
-const INTERVAL_SEC = Number(flag("interval", "20"));
+const INTERVAL_SEC = Number(flag("interval", "15"));
 const POLL_LIMIT = Number(flag("limit", "50"));
 const JOURNAL_DIR = flag("dir", "journals");
 const ORDER_TYPE = flag("orderType", BASE_DEFAULT_ORDER_TYPE);
@@ -62,6 +55,7 @@ async function flushNewRecords(prevSize) {
 
 async function cycle() {
   const before = journal.size();
+  const t0 = performance.now();
   try {
     const result = await runCycle(
       { risk, journal },
@@ -71,6 +65,7 @@ async function cycle() {
         referenceCostFn,
       }
     );
+    const latencyMs = Math.round(performance.now() - t0);
 
     journal.append({
       kind: "info",
@@ -87,6 +82,7 @@ async function cycle() {
         waited: String(result.waited),
         halted: result.halted,
         cycle: String(cycles + 1),
+        latencyMs: String(latencyMs),
         requestUrl: result.requestUrl ?? null,
       },
     });
@@ -105,21 +101,35 @@ async function cycle() {
         accepted: result.accepted,
         rejected: result.rejected,
         waited: result.waited,
+        latencyMs,
         halted: result.halted,
         journalSize: journal.size(),
         file: journalPath,
-        sources: { uniswapx: UNISWAPX_ORDERS_URL, rpc: RPC },
       })
     );
   } catch (err) {
+    const latencyMs = Math.round(performance.now() - t0);
     console.error(
       JSON.stringify({
         ts: new Date().toISOString(),
         level: "error",
         mode: "view",
+        latencyMs,
         message: err instanceof Error ? err.message : String(err),
       })
     );
+    journal.append({
+      kind: "info",
+      reason: "cycle_error",
+      context: {
+        dryRun: true,
+        mode: "view",
+        stage: "poll",
+        latencyMs: String(latencyMs),
+        error: err instanceof Error ? err.message.slice(0, 120) : String(err).slice(0, 120),
+      },
+    });
+    await flushNewRecords(before);
   }
 }
 
@@ -142,20 +152,16 @@ console.error(
   JSON.stringify({
     ts: new Date().toISOString(),
     level: "info",
-    message: "VIEW mode harness — real UniswapX + Base RPC, no signing",
+    message: "VIEW open channel — UniswapX + Base RPC",
     mode: "view",
     network: "base-mainnet",
     chainId: 8453,
     orderType: ORDER_TYPE,
-    sources: {
-      uniswapx: UNISWAPX_ORDERS_URL,
-      rpc: RPC,
-    },
+    sources: { uniswapx: UNISWAPX_ORDERS_URL, rpc: RPC },
     intervalSec: INTERVAL_SEC,
     pollLimit: POLL_LIMIT,
     journalPath,
     liveCapital: false,
-    write: false,
   })
 );
 
