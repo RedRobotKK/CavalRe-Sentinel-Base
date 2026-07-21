@@ -4,7 +4,6 @@ import { Circuit } from "./Circuit";
 import { ShaderBackdrop } from "./gl/ShaderBackdrop";
 import { CircuitThree } from "./gl/CircuitThree";
 import { Scope, type ScopeSample } from "./Scope";
-import { DecisionFunnel } from "./DecisionFunnel";
 
 type RecordRow = {
   seq?: number;
@@ -77,6 +76,20 @@ export function App() {
   const go = meta?.goNoGo;
   const activity = Math.min(1, (summary?.n ?? 0) / 60 + (scopeSamples.at(-1)?.raw ?? 0) * 0.3);
 
+  // top reject reasons for side panel (compact)
+  const topReasons = (() => {
+    const map = new Map<string, number>();
+    for (const r of records) {
+      if (r.kind !== "quote_rejected") continue;
+      const k = (r.reason ?? "?").slice(0, 36);
+      map.set(k, (map.get(k) ?? 0) + 1);
+    }
+    return [...map.entries()]
+      .map(([name, n]) => ({ name, n }))
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 5);
+  })();
+
   return (
     <div className="layout">
       <ShaderBackdrop activity={activity} />
@@ -118,7 +131,6 @@ export function App() {
         </div>
 
         <Scope samples={scopeSamples} />
-        <DecisionFunnel records={records} />
       </div>
 
       <div className="side-col">
@@ -174,6 +186,19 @@ export function App() {
         </div>
 
         <div className="panel panel-rise">
+          <h2>Drop reasons</h2>
+          {topReasons.length === 0 && (
+            <div className="muted">none yet</div>
+          )}
+          {topReasons.map((r) => (
+            <div className="metric-row" key={r.name}>
+              <span title={r.name}>{r.name}</span>
+              <span className="bad">×{r.n}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="panel panel-rise">
           <h2>Risk</h2>
           {meta?.risk &&
             Object.entries(meta.risk).map(([k, v]) => (
@@ -187,7 +212,7 @@ export function App() {
         <div className="panel panel-rise">
           <h2>Journals</h2>
           <ul className="clean">
-            {files.slice(0, 5).map((f) => (
+            {files.slice(0, 4).map((f) => (
               <li key={f.name}>
                 {f.name}
                 <div className="muted">{f.bytes} B</div>
