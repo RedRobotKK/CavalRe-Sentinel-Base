@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PipelineScene } from "./gl/PipelineScene";
 import { PipelineWire } from "./PipelineWire";
+import { PipelineHud, type HudStage } from "./PipelineHud";
 
 type StageId =
   | "poll"
@@ -135,6 +136,14 @@ function build(records: any[]) {
   let accept = 0;
   let wait = 0;
   let reject = 0;
+  let exclusiveDrops = 0;
+  let priorityDrops = 0;
+  let edgeNeg = 0;
+  let edgeOk = 0;
+  let edgeSum = 0;
+  let edgeN = 0;
+  let v3Path = 0;
+  let v2Path = 0;
   const signals: Signal[] = [];
   let lastHit: StageId = "poll";
 
@@ -145,6 +154,10 @@ function build(records: any[]) {
       pass.poll += 1;
       continue;
     }
+
+    const path = String(r.context?.resolvePath ?? "");
+    if (path === "v3_block") v3Path += 1;
+    if (path === "v2_time") v2Path += 1;
 
     if (
       r.kind !== "quote_accepted" &&
@@ -166,6 +179,18 @@ function build(records: any[]) {
     else if (action === "wait") wait += 1;
     else reject += 1;
 
+    const reasonRaw = String(r.reason ?? "");
+    if (reasonRaw.includes("exclusive")) exclusiveDrops += 1;
+    if (reasonRaw.includes("priority")) priorityDrops += 1;
+    if (reasonRaw === "edge_negative") edgeNeg += 1;
+    if (reasonRaw === "edge_ok") edgeOk += 1;
+
+    const eb = r.context?.edgeBps;
+    if (eb != null && eb !== "" && Number.isFinite(Number(eb))) {
+      edgeSum += Number(eb);
+      edgeN += 1;
+    }
+
     const st = stageFrom(r);
     lastHit = st;
     const idx = PATH.indexOf(st);
@@ -181,7 +206,6 @@ function build(records: any[]) {
 
     const ref = String(r.ref ?? "");
     const orderClass = String(r.context?.orderClass ?? "—");
-    const reasonRaw = String(r.reason ?? "");
     const edge = formatEdge(
       r.context?.edgeBps != null && r.context.edgeBps !== ""
         ? String(r.context.edgeBps)
@@ -204,12 +228,112 @@ function build(records: any[]) {
   }
 
   const log = [...signals].reverse().slice(0, 40);
+  const meanEdge = edgeN > 0 ? Math.round(edgeSum / edgeN) : null;
 
   const funnel = STAGES.map((s) => ({
     label: s.label,
     pass: pass[s.id],
     drop: drop[s.id],
   }));
+
+  const hud: HudStage[] = [
+    {
+      id: "poll",
+      label: "POLL",
+      pass: pass.poll,
+      drop: drop.poll,
+      lines: [
+        `heartbeats ${heartbeats}`,
+        `last raw ${lastRaw}`,
+        `source UniswapX`,
+        `chain Base · Dutch_V3`,
+      ],
+    },
+    {
+      id: "parse",
+      label: "PARSE",
+      pass: pass.parse,
+      drop: drop.parse,
+      lines: [
+        `orders decoded ${pass.parse}`,
+        `Amount = bigint`,
+        `curve fields extracted`,
+        `fail-closed on bad payload`,
+      ],
+    },
+    {
+      id: "classify",
+      label: "CLASS",
+      pass: pass.classify,
+      drop: drop.classify,
+      lines: [
+        `exclusive drops ${exclusiveDrops}`,
+        `priority drops ${priorityDrops}`,
+        `tradable dutch only`,
+        `block clock for exclusivity`,
+      ],
+    },
+    {
+      id: "decay",
+      label: "DECAY",
+      pass: pass.decay,
+      drop: drop.decay,
+      lines: [
+        `v3_block path ${v3Path}`,
+        `v2_time fallback ${v2Path}`,
+        `decayAtBlock piecewise`,
+        `inclusion lag ≤ 5`,
+      ],
+    },
+    {
+      id: "edge",
+      label: "EDGE",
+      pass: pass.edge,
+      drop: drop.edge,
+      lines: [
+        `edge_ok ${edgeOk}`,
+        `edge_negative ${edgeNeg}`,
+        meanEdge != null ? `mean edge ${meanEdge > 0 ? "+" : ""}${meanEdge} bps` : "mean edge —",
+        `ref QuoterV2 · floor div`,
+      ],
+    },
+    {
+      id: "risk",
+      label: "RISK",
+      pass: pass.risk,
+      drop: drop.risk,
+      lines: [
+        `working capital gate`,
+        `max position %`,
+        `toxicity check`,
+        `fail-closed`,
+      ],
+    },
+    {
+      id: "policy",
+      label: "POLICY",
+      pass: pass.policy,
+      drop: drop.policy,
+      lines: [
+        `accept ${accept}`,
+        `wait ${wait}`,
+        `reject ${reject}`,
+        `dry-run · capital OFF`,
+      ],
+    },
+    {
+      id: "book",
+      label: "BOOK",
+      pass: pass.book,
+      drop: drop.book,
+      lines: [
+        `posted accepts ${accept}`,
+        `VirtualBooks debit/credit`,
+        `Source sleeve invariant`,
+        `markout pending`,
+      ],
+    },
+  ];
 
   return {
     heartbeats,
@@ -220,6 +344,7 @@ function build(records: any[]) {
     seen: accept + wait + reject,
     signalsThrough: accept + wait,
     funnel,
+    hud,
     log,
     lastHit,
     live: records.length > 0,
@@ -319,6 +444,7 @@ export function Circuit({
           intensity={Math.min(1, 0.4 + m.seen / 40)}
           stages={m.funnel}
         />
+        <PipelineHud stages={m.hud} />
       </div>
 
       <div className="pipe-outcomes">
