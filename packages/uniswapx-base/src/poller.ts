@@ -1,5 +1,6 @@
-import { BASE_CHAIN_ID, UNISWAPX_ORDERS_URL } from "./constants.js";
+import { BASE_CHAIN_ID, UNISWAPX_ORDERS_URL, DEFAULT_BASE_RPC } from "./constants.js";
 import { parseOrders } from "./parse.js";
+import { fetchBaseBlockNumber, type RpcFetchFn } from "./block.js";
 import type { ParsedOrder } from "./types.js";
 
 export type FetchFn = (url: string) => Promise<Response>;
@@ -10,6 +11,8 @@ export interface PollResult {
   fetchedAt: string;
   rawCount: number;
   requestUrl: string;
+  /** Base head block at poll time (V3 clock). null if fetch failed. */
+  currentBlock: number | null;
 }
 
 export interface PollerOptions {
@@ -21,6 +24,13 @@ export interface PollerOptions {
    * Base: Dutch_V3 (Uniswap filler docs).
    */
   orderType?: string;
+  /** RPC for eth_blockNumber (V3). */
+  rpcUrl?: string;
+  rpcFetchFn?: RpcFetchFn;
+  /** Blocks to add for expected inclusion (default 0). */
+  inclusionLag?: number;
+  /** Skip block fetch (tests). */
+  skipBlockNumber?: boolean;
 }
 
 /** Default order type for Base mainnet per Uniswap filler docs. */
@@ -28,6 +38,7 @@ export const BASE_DEFAULT_ORDER_TYPE = "Dutch_V3";
 
 /**
  * Fetch open UniswapX orders for Base and parse them.
+ * Also reads eth_blockNumber for Dutch V3 decay clock.
  * Pure data path — no signing, no execution, safe for dry-run.
  */
 export async function pollOpenOrders(
@@ -57,11 +68,25 @@ export async function pollOpenOrders(
 
   const { orders, rejections } = parseOrders(rawList);
 
+  let currentBlock: number | null = null;
+  if (!options.skipBlockNumber) {
+    try {
+      currentBlock = await fetchBaseBlockNumber({
+        rpcUrl: options.rpcUrl ?? process.env.BASE_RPC_URL ?? DEFAULT_BASE_RPC,
+        fetchFn: options.rpcFetchFn,
+        inclusionLag: options.inclusionLag ?? 0,
+      });
+    } catch {
+      currentBlock = null;
+    }
+  }
+
   return {
     orders,
     rejections,
     fetchedAt: new Date().toISOString(),
     rawCount: rawList.length,
     requestUrl,
+    currentBlock,
   };
 }
