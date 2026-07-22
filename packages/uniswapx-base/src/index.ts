@@ -20,6 +20,9 @@ export {
 } from "./poller.js";
 export {
   fetchBaseBlockNumber,
+  normalizeInclusionLag,
+  BlockClockError,
+  MAX_INCLUSION_LAG,
   type RpcFetchFn,
 } from "./block.js";
 export {
