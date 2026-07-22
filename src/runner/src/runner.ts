@@ -4,11 +4,7 @@ import type { ParsedOrder } from "@cavalre/uniswapx-base";
 import {
   classifyOrder,
   isTradableClass,
-  resolveOrderAmounts,
-  computeEdgeBps,
-  heuristicToxicity,
-  decideFill,
-  DutchDecayError,
+  evaluateDutchAuction,
 } from "@cavalre/strategy";
 import type {
   RunnerConfig,
@@ -69,7 +65,8 @@ export async function runCycle(
   }
 
   for (const order of poll.orders) {
-    const orderClass = classifyOrder(order);
+    // nowSec: exclusivity end proxy (decayStartTime) vs wall clock
+    const orderClass = classifyOrder(order, nowSec);
 
     if (!isTradableClass(orderClass)) {
       rejected += 1;
@@ -82,60 +79,53 @@ export async function runCycle(
           order,
           orderClass,
           policyAction: "reject",
+          nowSec,
         }),
       });
       continue;
     }
 
-    let resolved;
-    try {
-      resolved = resolveOrderAmounts(order, nowSec);
-    } catch (e) {
+    // Missing decay window → cannot run Dutch evaluator
+    if (order.decayStartTime === null || order.decayEndTime === null) {
       rejected += 1;
-      const reason =
-        e instanceof DutchDecayError ? e.message : "resolve_failed";
       deps.journal.append({
         kind: "quote_rejected",
-        reason,
+        reason: "missing_decay_window",
         ref: order.orderHash,
         context: featureContext({
           stage: "resolve",
           order,
           orderClass,
           policyAction: "reject",
+          nowSec,
         }),
       });
       continue;
     }
 
     let refOutput = 0n;
-    let edgeUndefined = true;
-    let edgeBps = 0;
     let quoteErr: string | null = null;
+
+    // Quote with start input as size probe; evaluator re-resolves at nowSec
+    const quoteInput = order.inputStart;
 
     if (config.referenceCostFn) {
       try {
-        refOutput = await config.referenceCostFn(order, resolved.input);
-        const edge = computeEdgeBps({
-          resolvedOutput: resolved.output,
-          refOutput,
-        });
-        edgeBps = edge.edgeBps;
-        edgeUndefined = edge.undefined;
-        if (edgeUndefined) {
+        refOutput = await config.referenceCostFn(order, quoteInput);
+        if (refOutput === 0n) {
           quoteErr =
             (config.referenceCostFn as { lastError?: string }).lastError ??
             "ref_output_zero";
         }
       } catch (e) {
         quoteErr = e instanceof Error ? e.message.slice(0, 80) : "quote_throw";
-        edgeUndefined = true;
+        refOutput = 0n;
       }
     } else {
       quoteErr = "no_referenceCostFn";
     }
 
-    if (edgeUndefined) {
+    if (refOutput === 0n) {
       rejected += 1;
       deps.journal.append({
         kind: "quote_rejected",
@@ -143,80 +133,79 @@ export async function runCycle(
           ? `edge_undefined:${quoteErr}`.slice(0, 120)
           : "edge_undefined_no_reference_cost",
         ref: order.orderHash,
-        amount: resolved.input,
+        amount: quoteInput,
         context: featureContext({
           stage: "edge",
           order,
           orderClass,
-          resolvedInput: resolved.input,
-          resolvedOutput: resolved.output,
-          refOutput,
-          edgeBps,
-          decayProgressBps: resolved.decayProgressBps,
           policyAction: "reject",
+          nowSec,
+          refOutput: 0n,
         }),
       });
       continue;
     }
 
-    const toxicity = heuristicToxicity({
-      decayProgressBps: resolved.decayProgressBps,
-      edgeBpsVsAmm: edgeBps,
-    });
+    const riskDecision = deps.risk.checkPositionSize(quoteInput);
 
-    const riskDecision = deps.risk.checkPositionSize(resolved.input);
-
-    const fillDecision = decideFill({
-      notional: resolved.input,
-      edgeBps,
-      toxicity,
-      decayProgressBps: resolved.decayProgressBps,
+    const auction = evaluateDutchAuction({
+      inputStart: order.inputStart,
+      inputEnd: order.inputEnd,
+      outputStart: order.outputStart,
+      outputEnd: order.outputEnd,
+      decayStartTime: order.decayStartTime,
+      decayEndTime: order.decayEndTime,
+      now: nowSec,
+      refOutput,
       riskAllowed: riskDecision.allowed,
       riskReason: riskDecision.reason,
+      notional: quoteInput,
     });
 
     const ctx = featureContext({
       stage: "policy",
       order,
       orderClass,
-      resolvedInput: resolved.input,
-      resolvedOutput: resolved.output,
+      policyAction: auction.decision.action,
+      nowSec,
+      resolvedInput: auction.resolved.input,
+      resolvedOutput: auction.resolved.output,
       refOutput,
-      edgeBps,
-      toxicity,
-      decayProgressBps: resolved.decayProgressBps,
-      policyAction: fillDecision.action,
+      edgeBps: auction.edge.edgeBps,
+      toxicity: auction.toxicity,
+      decayProgressBps: auction.decayProgressBps,
+      auctionPhase: auction.phase,
     });
 
-    if (fillDecision.action === "accept") {
+    if (auction.decision.action === "accept") {
       accepted += 1;
       acceptedOrders.push(order);
       deps.journal.append({
         kind: "quote_accepted",
-        reason: fillDecision.reason,
+        reason: auction.decision.reason,
         ref: order.orderHash,
-        amount: resolved.input,
-        amount2: resolved.output,
+        amount: auction.resolved.input,
+        amount2: auction.resolved.output,
         context: ctx,
       });
-    } else if (fillDecision.action === "wait") {
+    } else if (auction.decision.action === "wait") {
       waited += 1;
       deps.journal.append({
         kind: "info",
-        reason: fillDecision.reason,
+        reason: auction.decision.reason,
         ref: order.orderHash,
-        amount: resolved.input,
-        amount2: resolved.output,
+        amount: auction.resolved.input,
+        amount2: auction.resolved.output,
         context: ctx,
       });
     } else {
       rejected += 1;
       deps.journal.append({
         kind: "quote_rejected",
-        reason: fillDecision.reason,
+        reason: auction.decision.reason,
         ref: order.orderHash,
-        amount: resolved.input,
-        amount2: resolved.output,
+        amount: auction.resolved.input,
+        amount2: auction.resolved.output,
         context: ctx,
       });
     }
@@ -240,12 +229,14 @@ function featureContext(p: {
   order: ParsedOrder;
   orderClass: string;
   policyAction: string;
+  nowSec?: number;
   resolvedInput?: bigint;
   resolvedOutput?: bigint;
   refOutput?: bigint;
   edgeBps?: number;
   toxicity?: number;
   decayProgressBps?: number;
+  auctionPhase?: string;
 }): Record<string, string | boolean | null> {
   return {
     dryRun: true,
@@ -256,6 +247,12 @@ function featureContext(p: {
     outputToken: p.order.outputToken,
     policyAction: p.policyAction,
     exclusiveFiller: p.order.exclusiveFiller,
+    decayStartTime:
+      p.order.decayStartTime !== null ? String(p.order.decayStartTime) : null,
+    decayEndTime:
+      p.order.decayEndTime !== null ? String(p.order.decayEndTime) : null,
+    nowSec: p.nowSec !== undefined ? String(p.nowSec) : null,
+    auctionPhase: p.auctionPhase ?? null,
     decayProgressBps:
       p.decayProgressBps !== undefined ? String(p.decayProgressBps) : null,
     edgeBps: p.edgeBps !== undefined ? String(p.edgeBps) : null,
