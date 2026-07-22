@@ -2,12 +2,14 @@
 /**
  * Local journal API for Sentinel Desk.
  * Binds 127.0.0.1 only. Read-only. No keys.
+ *
+ * Wallet meta is inlined (view/none postures) so plain `node` does not need
+ * to resolve @cavalre/wallet TypeScript sources.
  */
 
 import { createServer } from "node:http";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, basename } from "node:path";
-import { resolveWalletSession, walletPublicContext } from "@cavalre/wallet";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.DESK_API_PORT ?? 8787);
@@ -48,32 +50,29 @@ function operatingMode() {
   };
 }
 
-/**
- * Desk wallet posture — never loads private keys into API process for display.
- * Keys in env only flip credentialsPresent note; posture stays view/none until live path.
- */
+/** Mirrors @cavalre/wallet resolveWalletSession for desk display only. */
 function walletLifecycleMeta() {
-  const displayAddress = process.env.SENTINEL_ADDRESS ?? null;
+  const raw = process.env.SENTINEL_ADDRESS ?? null;
   const hasKey = Boolean(
     process.env.SENTINEL_PRIVATE_KEY || process.env.FILLER_PRIVATE_KEY
   );
-  // Desk API does not construct LocalSigner — no key material in this process for /meta
-  const session = resolveWalletSession({
-    phase: "C",
-    displayAddress,
-    signer: null,
-    goNoGoSatisfied: false,
-  });
-  const pub = walletPublicContext(session);
+  let walletAddress = null;
+  if (raw && /^0x[0-9a-fA-F]{40}$/.test(raw)) {
+    walletAddress = raw.toLowerCase();
+  }
+  const walletPosture = walletAddress ? "view" : "none";
   return {
-    ...pub,
+    walletPosture,
+    walletAddress,
+    liveCapitalAllowed: false,
+    phase: "C",
     liveSigning: false,
     writeEnabled: false,
     browserKeys: false,
     credentialsPresent: hasKey,
-    addressConfigured: Boolean(displayAddress),
+    addressConfigured: Boolean(walletAddress),
     note:
-      pub.walletPosture === "view"
+      walletPosture === "view"
         ? "display address only · liveCapital=false"
         : "no wallet configured · research VIEW",
   };
