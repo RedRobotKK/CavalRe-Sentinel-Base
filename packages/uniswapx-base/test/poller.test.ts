@@ -36,13 +36,17 @@ describe("pollOpenOrders", () => {
       ],
     };
 
-    const result = await pollOpenOrders({ fetchFn: mockFetch(wire) });
+    const result = await pollOpenOrders({
+      fetchFn: mockFetch(wire),
+      skipBlockNumber: true,
+    });
 
     expect(result.rawCount).toBe(1);
     expect(result.orders).toHaveLength(1);
     expect(result.orders[0].orderHash).toBe("0xorder1");
     expect(result.rejections).toHaveLength(0);
     expect(typeof result.orders[0].inputStart).toBe("bigint");
+    expect(result.currentBlock).toBeNull();
   });
 
   it("surfaces rejections for malformed orders", async () => {
@@ -70,7 +74,10 @@ describe("pollOpenOrders", () => {
       ],
     };
 
-    const result = await pollOpenOrders({ fetchFn: mockFetch(wire) });
+    const result = await pollOpenOrders({
+      fetchFn: mockFetch(wire),
+      skipBlockNumber: true,
+    });
     expect(result.orders).toHaveLength(1);
     expect(result.rejections).toHaveLength(1);
     expect(result.rejections[0].orderHash).toBe("0xbad");
@@ -78,15 +85,28 @@ describe("pollOpenOrders", () => {
 
   it("throws on non-2xx response", async () => {
     await expect(
-      pollOpenOrders({ fetchFn: mockFetch({}, 500) })
+      pollOpenOrders({ fetchFn: mockFetch({}, 500), skipBlockNumber: true })
     ).rejects.toThrow("uniswapx_poll_failed:500");
   });
 
   it("handles empty orders array", async () => {
     const result = await pollOpenOrders({
       fetchFn: mockFetch({ orders: [] }),
+      skipBlockNumber: true,
     });
     expect(result.rawCount).toBe(0);
     expect(result.orders).toHaveLength(0);
+  });
+
+  it("records currentBlock from RPC when provided", async () => {
+    const result = await pollOpenOrders({
+      fetchFn: mockFetch({ orders: [] }),
+      rpcFetchFn: async () =>
+        new Response(
+          JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0xff" }),
+          { status: 200 }
+        ),
+    });
+    expect(result.currentBlock).toBe(255);
   });
 });
