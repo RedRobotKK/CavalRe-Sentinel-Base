@@ -1,0 +1,129 @@
+/* Drop reasons — ranked proportional list */
+.stream-chart.drop-chart {
+  min-height: 168px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chart-title-meta {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: none;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.drop-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.drop-rank {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1;
+}
+
+.drop-rank-row {
+  min-width: 0;
+}
+
+.drop-rank-head {
+  display: grid;
+  grid-template-columns: 44px 1fr auto auto;
+  gap: 6px;
+  align-items: baseline;
+  margin-bottom: 3px;
+  font-size: 11px;
+}
+
+.drop-cat {
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0.9;
+}
+
+.drop-label {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drop-n {
+  color: var(--phosphor);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-width: 2ch;
+  text-align: right;
+}
+
+.drop-pct {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 4ch;
+  text-align: right;
+  font-size: 10px;
+}
+
+.drop-track {
+  height: 5px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(92, 51, 16, 0.45);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.drop-fill {
+  height: 100%;
+  border-radius: 1px;
+  min-width: 2px;
+  transition: width 0.35s ease-out;
+  box-shadow: 0 0 8px rgba(255, 140, 30, 0.25);
+}
+
+.drop-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(92, 51, 16, 0.35);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.drop-legend span::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  vertical-align: middle;
+  border-radius: 1px;
+}
+
+.drop-legend .cat-classify::before { background: #c47a22; }
+.drop-legend .cat-risk::before { background: #e8a838; }
+.drop-legend .cat-edge::before { background: #ff5533; }
+.drop-legend .cat-policy::before { background: #ff8c1a; }
+.drop-legend .cat-parse::before { background: #8a5a1e; }
