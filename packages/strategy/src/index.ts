@@ -37,8 +37,10 @@ export {
 export { computeEdgeBps, type EdgeInput, type EdgeResult } from "./edge.js";
 export {
   resolveOrderAmounts,
+  canResolveV3,
   type ResolvableOrder,
   type ResolvedAmounts,
+  type ResolveClock,
 } from "./resolve.js";
 export {
   summarizeFlow,
@@ -47,6 +49,7 @@ export {
 } from "./flow-taxonomy.js";
 export {
   dutchAuctionPhase,
+  dutchAuctionPhaseBlocks,
   evaluateDutchAuction,
   type DutchAuctionPhase,
   type DutchAuctionInput,
