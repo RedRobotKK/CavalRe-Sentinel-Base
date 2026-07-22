@@ -1,15 +1,21 @@
 /**
- * Experimental IEEE-754 float path vs production bigint Amount math.
- * NOT for production fills — comparison / research only.
+ * TRUST — float math root of truth:
+ *   https://github.com/CavalRe/cavalre-contracts/blob/main/math/FloatLib.sol
+ *   (CavalRe Float type: 21 significant digits, dynamic exponent, int256 packed)
  *
- * "floatlib" here = plain Number arithmetic (no external package).
- * Above 2^53−1, not every integer is representable → decay/edge can drift.
+ * This file is an **IEEE-754 Number** side-channel for A/B vs bigint Amount.
+ * It is NOT a port of FloatLib and must not be used for production fills.
+ *
+ * Production money path: @cavalre/core Amount (bigint).
+ * Future: TS FloatLib-compatible helpers should match on-chain FloatLib
+ * semantics (normalize / align / times / divide / fullMulDiv), not Number.
  */
 
 import type { Amount } from "@cavalre/core";
 import { computeEdgeBps } from "./edge.js";
 import { linearDecay, decayProgressBps } from "./dutch-decay.js";
 
+/** @deprecated name — IEEE only; see FloatLib TRUST header */
 export function floatLinearDecay(
   startTime: number,
   endTime: number,
@@ -26,7 +32,7 @@ export function floatLinearDecay(
   return startAmount + ((endAmount - startAmount) * elapsed) / duration;
 }
 
-/** Same formula as computeEdgeBps but fully in Number. */
+/** Same edge formula in Number — not FloatLib.divide. */
 export function floatEdgeBps(resolvedOutput: number, refOutput: number): {
   edgeBps: number;
   undefined: boolean;
@@ -50,7 +56,8 @@ function relBps(bigintN: number, floatN: number): number | null {
 }
 
 /**
- * Compare bigint vs float for one decay + edge snapshot.
+ * Compare production bigint vs IEEE Number (research).
+ * Does not invoke CavalRe FloatLib; that lives on-chain / future TS port.
  */
 export function compareDecayAndEdge(p: {
   label?: string;
@@ -65,6 +72,7 @@ export function compareDecayAndEdge(p: {
   progressBps: { bigint: number; float: number };
   resolvedOut: MathCompareRow;
   edgeBps: MathCompareRow;
+  trustNote: string;
 } {
   const label = p.label ?? "sample";
 
@@ -118,5 +126,7 @@ export function compareDecayAndEdge(p: {
       absDiff: Math.abs(flEdgeN - biEdgeN),
       relDiffBps: relBps(biEdgeN, flEdgeN),
     },
+    trustNote:
+      "FloatLib root: https://github.com/CavalRe/cavalre-contracts/blob/main/math/FloatLib.sol — this compare uses IEEE Number only",
   };
 }
