@@ -2,6 +2,7 @@ import type { DecisionJournal } from "@cavalre/journal";
 import type { RiskEngine } from "@cavalre/risk-engine";
 import type { FetchFn, ParsedOrder } from "@cavalre/uniswapx-base";
 import type { Amount } from "@cavalre/core";
+import type { VirtualBooks } from "@cavalre/strategy";
 
 export type RunnerMode = "dry-run" | "live";
 
@@ -23,6 +24,8 @@ export interface RunnerConfig {
 export interface RunnerDeps {
   risk: RiskEngine;
   journal: DecisionJournal;
+  /** Phase B: optional off-chain ledger mirror */
+  virtualBooks?: VirtualBooks;
 }
 
 export interface CycleResult {
@@ -35,4 +38,5 @@ export interface CycleResult {
   halted: boolean;
   acceptedOrders: ParsedOrder[];
   requestUrl?: string;
+  booksSnapshot?: { root: string; sleeve: string; balance: string }[];
 }

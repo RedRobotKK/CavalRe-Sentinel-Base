@@ -65,7 +65,6 @@ export async function runCycle(
   }
 
   for (const order of poll.orders) {
-    // nowSec: exclusivity end proxy (decayStartTime) vs wall clock
     const orderClass = classifyOrder(order, nowSec);
 
     if (!isTradableClass(orderClass)) {
@@ -85,7 +84,6 @@ export async function runCycle(
       continue;
     }
 
-    // Missing decay window → cannot run Dutch evaluator
     if (order.decayStartTime === null || order.decayEndTime === null) {
       rejected += 1;
       deps.journal.append({
@@ -105,8 +103,6 @@ export async function runCycle(
 
     let refOutput = 0n;
     let quoteErr: string | null = null;
-
-    // Quote with start input as size probe; evaluator re-resolves at nowSec
     const quoteInput = order.inputStart;
 
     if (config.referenceCostFn) {
@@ -180,13 +176,35 @@ export async function runCycle(
     if (auction.decision.action === "accept") {
       accepted += 1;
       acceptedOrders.push(order);
+
+      let booksNote: string | null = null;
+      if (deps.virtualBooks) {
+        try {
+          deps.virtualBooks.postAccept({
+            inputRoot: order.inputToken,
+            outputRoot: order.outputToken,
+            inputAmount: auction.resolved.input,
+            outputAmount: auction.resolved.output,
+            ref: order.orderHash,
+          });
+          booksNote = "posted";
+        } catch (e) {
+          booksNote =
+            e instanceof Error ? e.message.slice(0, 64) : "books_post_failed";
+          // Research path: still journal accept; books failure is informational
+        }
+      }
+
       deps.journal.append({
         kind: "quote_accepted",
         reason: auction.decision.reason,
         ref: order.orderHash,
         amount: auction.resolved.input,
         amount2: auction.resolved.output,
-        context: ctx,
+        context: {
+          ...ctx,
+          virtualBooks: booksNote,
+        },
       });
     } else if (auction.decision.action === "wait") {
       waited += 1;
@@ -221,6 +239,7 @@ export async function runCycle(
     halted: deps.risk.isHalted(),
     acceptedOrders,
     requestUrl: poll.requestUrl,
+    booksSnapshot: deps.virtualBooks?.snapshot(),
   };
 }
 
