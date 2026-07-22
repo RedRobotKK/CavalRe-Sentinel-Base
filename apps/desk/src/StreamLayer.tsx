@@ -20,7 +20,7 @@ type Rec = {
 const BAD = "#ff5533";
 const OK = "#ffcc66";
 const MUTED = "#8a5a1e";
-const GRID = "#3a2008";
+const GRID = "#2a1808";
 
 type DropCat = "classify" | "risk" | "edge" | "policy" | "parse" | "other";
 
@@ -32,7 +32,6 @@ type DropRow = {
   cat: DropCat;
 };
 
-/** Machine reason → short human label + category */
 function normalizeDrop(reason: string): { key: string; label: string; cat: DropCat } {
   const r = reason.trim();
   if (r.startsWith("class_not_tradable:exclusive") || r === "class:exclusive") {
@@ -58,9 +57,6 @@ function normalizeDrop(reason: string): { key: string; label: string; cat: DropC
   }
   if (r.startsWith("edge_undefined")) {
     return { key: "edge_undef", label: "No AMM reference", cat: "edge" };
-  }
-  if (r === "edge_ok") {
-    return { key: "edge_ok", label: "Edge OK (accept)", cat: "policy" };
   }
   if (r === "toxicity_high") {
     return { key: "tox", label: "High toxicity", cat: "policy" };
@@ -96,164 +92,134 @@ const CAT_LABEL: Record<DropCat, string> = {
   other: "other",
 };
 
-const LAT_BUCKETS = [
-  { key: "<100", max: 100 },
-  { key: "100–200", max: 200 },
-  { key: "200–400", max: 400 },
-  { key: "400–800", max: 800 },
-  { key: "800+", max: Infinity },
-] as const;
-
-function latencyHealth(p95: number | null): "good" | "warn" | "bad" | "none" {
-  if (p95 == null) return "none";
-  if (p95 < 300) return "good";
-  if (p95 < 800) return "warn";
-  return "bad";
-}
-
 export function StreamLayer({ records }: { records: Rec[] }) {
   const model = useMemo(() => windowed(records), [records]);
-  const health = latencyHealth(model.latP95);
+  const hasLatency = model.latSamples >= 3;
 
   return (
-    <div className="stream-layer panel-rise">
-      <div className="stream-layer-head">
-        <h2>Stream · open channel</h2>
-        <span className="muted">
-          {model.windows.length} cycles · pass-through emphasized
-        </span>
-      </div>
-
-      <div className="stream-kpis">
-        <Kpi label="latency p50" value={fmtMs(model.latP50)} />
-        <Kpi label="latency p95" value={fmtMs(model.latP95)} alert={health === "bad"} />
-        <Kpi label="pass rate" value={fmtPct(model.passRate)} />
-        <Kpi
-          label="reject rate"
-          value={fmtPct(model.rejectRate)}
-          alert={model.rejectRate > 0.85}
-        />
-        <Kpi label="signals thru" value={String(model.signalsThru)} />
-      </div>
-
-      <div className="stream-charts">
-        <div className="stream-chart">
-          <div className="chart-title">Pass vs reject (per cycle)</div>
-          <ResponsiveContainer width="100%" height={130}>
-            <AreaChart data={model.windows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid stroke={GRID} strokeDasharray="3 3" />
-              <XAxis dataKey="t" stroke={MUTED} fontSize={9} tick={{ fill: MUTED }} />
-              <YAxis stroke={MUTED} fontSize={9} width={28} allowDecimals={false} />
-              <Tooltip contentStyle={tooltipStyle} />
-              <Area
-                type="monotone"
-                dataKey="passed"
-                stackId="1"
-                stroke={OK}
-                fill="rgba(255,204,102,0.35)"
-                strokeWidth={1.5}
-                isAnimationActive={false}
-                name="pass"
-              />
-              <Area
-                type="monotone"
-                dataKey="rejected"
-                stackId="1"
-                stroke={BAD}
-                fill="rgba(255,85,51,0.25)"
-                strokeWidth={1.5}
-                isAnimationActive={false}
-                name="reject"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+    <div className="stream-layer stream-layer-v2 panel-rise">
+      <header className="sl-head">
+        <div className="sl-title-block">
+          <h2>Stream</h2>
+          <span className="sl-channel">open channel</span>
         </div>
+        <div className="sl-meta">
+          <span className="sl-meta-item">
+            <em>{model.windows.length}</em> cycles
+          </span>
+          <span className="sl-dot" aria-hidden />
+          <span className="sl-meta-item muted">VIEW · Dutch_V3</span>
+        </div>
+      </header>
 
-        <div className="stream-chart latency-panel">
-          <div className="chart-title">
-            Poll latency
-            <span className="chart-title-meta">UniswapX + path · ms</span>
+      {/* Only metrics that always have meaning */}
+      <div className="sl-kpis">
+        <div className="sl-kpi primary">
+          <span className="sl-kpi-label">Pass rate</span>
+          <span className="sl-kpi-value">{fmtPct(model.passRate)}</span>
+          <span className="sl-kpi-hint">accept + wait / decided</span>
+        </div>
+        <div className={`sl-kpi${model.rejectRate > 0.85 ? " alert" : ""}`}>
+          <span className="sl-kpi-label">Reject rate</span>
+          <span className="sl-kpi-value">{fmtPct(model.rejectRate)}</span>
+          <span className="sl-kpi-hint">{model.dropTotal} drops in window</span>
+        </div>
+        <div className="sl-kpi accent">
+          <span className="sl-kpi-label">Signals through</span>
+          <span className="sl-kpi-value">{model.signalsThru}</span>
+          <span className="sl-kpi-hint">past policy gate</span>
+        </div>
+        {hasLatency && (
+          <div className="sl-kpi">
+            <span className="sl-kpi-label">Poll p95</span>
+            <span className="sl-kpi-value">{fmtMs(model.latP95)}</span>
+            <span className="sl-kpi-hint">
+              p50 {fmtMs(model.latP50)} · n={model.latSamples}
+            </span>
           </div>
+        )}
+      </div>
 
-          {model.latSamples < 3 ? (
-            <div className="lat-empty">
-              <p>No poll timings yet</p>
-              <span>Appears when live dry-run heartbeats include latencyMs</span>
-            </div>
-          ) : (
-            <>
-              <div className={`lat-status lat-${health}`}>
-                <div className="lat-status-main">
-                  <span className="lat-status-label">p95</span>
-                  <strong>{fmtMs(model.latP95)}</strong>
-                </div>
-                <div className="lat-status-side">
-                  <span>
-                    p50 <em>{fmtMs(model.latP50)}</em>
-                  </span>
-                  <span>
-                    last <em>{fmtMs(model.latLast)}</em>
-                  </span>
-                  <span>
-                    max <em>{fmtMs(model.latMax)}</em>
-                  </span>
-                </div>
-                <div className="lat-status-tag">
-                  {health === "good" && "healthy"}
-                  {health === "warn" && "elevated"}
-                  {health === "bad" && "slow"}
-                </div>
-              </div>
+      <div className={`sl-body${hasLatency ? " with-lat" : ""}`}>
+        <section className="sl-panel sl-chart">
+          <div className="sl-panel-head">
+            <h3>Pass vs reject</h3>
+            <span className="sl-panel-sub">per cycle · stacked</span>
+          </div>
+          <div className="sl-chart-wrap">
+            <ResponsiveContainer width="100%" height={148}>
+              <AreaChart
+                data={model.windows}
+                margin={{ top: 8, right: 6, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid stroke={GRID} strokeDasharray="2 4" vertical={false} />
+                <XAxis
+                  dataKey="t"
+                  stroke={MUTED}
+                  fontSize={9}
+                  tick={{ fill: MUTED }}
+                  tickLine={false}
+                  axisLine={false}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  stroke={MUTED}
+                  fontSize={9}
+                  width={24}
+                  allowDecimals={false}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <Tooltip contentStyle={tooltipStyle} />
+                <Area
+                  type="monotone"
+                  dataKey="passed"
+                  stackId="1"
+                  stroke={OK}
+                  fill="rgba(255,204,102,0.28)"
+                  strokeWidth={1.5}
+                  isAnimationActive={false}
+                  name="pass"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="rejected"
+                  stackId="1"
+                  stroke={BAD}
+                  fill="rgba(255,85,51,0.22)"
+                  strokeWidth={1.5}
+                  isAnimationActive={false}
+                  name="reject"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
 
-              <div className="lat-hist">
-                {model.latHist.map((b) => (
-                  <div key={b.key} className="lat-hist-col">
-                    <div className="lat-hist-bar-wrap">
-                      <div
-                        className="lat-hist-bar"
-                        style={{
-                          height: `${Math.max(b.pct > 0 ? 8 : 0, b.pct)}%`,
-                          opacity: b.n > 0 ? 1 : 0.25,
-                        }}
-                        title={`${b.key}: ${b.n} cycles`}
-                      />
-                    </div>
-                    <span className="lat-hist-label">{b.key}</span>
-                    <span className="lat-hist-n">{b.n || ""}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="lat-foot">
-                {model.latSamples} samples · buckets by cycle time
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="stream-chart drop-chart">
-          <div className="chart-title">
-            Drop reasons
-            <span className="chart-title-meta">
+        <section className="sl-panel sl-drops">
+          <div className="sl-panel-head">
+            <h3>Drop reasons</h3>
+            <span className="sl-panel-sub">
               {model.dropTotal} rejects · share of drops
             </span>
           </div>
           {model.topDrops.length === 0 ? (
-            <div className="drop-empty">No rejects in window</div>
+            <div className="sl-empty">No rejects in window</div>
           ) : (
-            <ul className="drop-rank">
+            <ul className="sl-drop-list">
               {model.topDrops.map((d) => (
-                <li key={d.key} className="drop-rank-row">
-                  <div className="drop-rank-head">
-                    <span className={`drop-cat cat-${d.cat}`}>{CAT_LABEL[d.cat]}</span>
-                    <span className="drop-label">{d.label}</span>
-                    <span className="drop-n">{d.n}</span>
-                    <span className="drop-pct">{d.pct}%</span>
+                <li key={d.key} className="sl-drop-row">
+                  <div className="sl-drop-top">
+                    <span className={`sl-cat cat-${d.cat}`}>{CAT_LABEL[d.cat]}</span>
+                    <span className="sl-drop-label">{d.label}</span>
+                    <span className="sl-drop-n">{d.n}</span>
+                    <span className="sl-drop-pct">{d.pct}%</span>
                   </div>
-                  <div className="drop-track">
+                  <div className="sl-drop-track">
                     <div
-                      className="drop-fill"
+                      className="sl-drop-fill"
                       style={{
-                        width: `${Math.max(2, d.pct)}%`,
+                        width: `${Math.max(3, d.pct)}%`,
                         background: CAT_COLOR[d.cat],
                       }}
                     />
@@ -262,17 +228,33 @@ export function StreamLayer({ records }: { records: Rec[] }) {
               ))}
             </ul>
           )}
-          <div className="drop-legend">
-            <span className="cat-classify">class</span>
-            <span className="cat-risk">risk</span>
-            <span className="cat-edge">edge</span>
-            <span className="cat-policy">policy</span>
-            <span className="cat-parse">parse</span>
-          </div>
-        </div>
+        </section>
+
+        {hasLatency && (
+          <section className="sl-panel sl-lat">
+            <div className="sl-panel-head">
+              <h3>Poll latency</h3>
+              <span className="sl-panel-sub">ms · dry-run heartbeats</span>
+            </div>
+            <div className="sl-lat-figures">
+              <div>
+                <span className="sl-lat-k">p50</span>
+                <strong>{fmtMs(model.latP50)}</strong>
+              </div>
+              <div>
+                <span className="sl-lat-k">p95</span>
+                <strong>{fmtMs(model.latP95)}</strong>
+              </div>
+              <div>
+                <span className="sl-lat-k">last</span>
+                <strong>{fmtMs(model.latLast)}</strong>
+              </div>
+            </div>
+          </section>
+        )}
       </div>
 
-      <div className="stream-primitives">
+      <footer className="sl-foot">
         <span>
           <em>wire</em> UniswapX Dutch_V3
         </span>
@@ -285,36 +267,18 @@ export function StreamLayer({ records }: { records: Rec[] }) {
         <span>
           <em>amount</em> bigint
         </span>
-        <span>
-          <em>mode</em> VIEW
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function Kpi({
-  label,
-  value,
-  alert,
-}: {
-  label: string;
-  value: string;
-  alert?: boolean;
-}) {
-  return (
-    <div className={`skpi${alert ? " alert" : ""}`}>
-      <div className="skpi-label">{label}</div>
-      <div className="skpi-value">{value}</div>
+      </footer>
     </div>
   );
 }
 
 const tooltipStyle = {
-  background: "#120a04",
+  background: "#0e0804",
   border: "1px solid #5c3310",
   fontSize: 11,
   color: "#ffb84d",
+  borderRadius: 0,
+  boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
 };
 
 function fmtMs(n: number | null) {
@@ -383,22 +347,8 @@ function windowed(records: Rec[]) {
     sortedLat.length > 0
       ? sortedLat[Math.min(sortedLat.length - 1, Math.floor(sortedLat.length * 0.95))]!
       : null;
-  const latMax = sortedLat.length > 0 ? sortedLat[sortedLat.length - 1]! : null;
   const latLast =
     latencies.length > 0 ? latencies[latencies.length - 1]! : null;
-
-  const histCounts = LAT_BUCKETS.map(() => 0);
-  for (const ms of latencies) {
-    const idx = LAT_BUCKETS.findIndex((b) => ms < b.max || b.max === Infinity);
-    const i = idx >= 0 ? idx : LAT_BUCKETS.length - 1;
-    histCounts[i]! += 1;
-  }
-  const histMax = Math.max(1, ...histCounts);
-  const latHist = LAT_BUCKETS.map((b, i) => ({
-    key: b.key,
-    n: histCounts[i]!,
-    pct: Math.round((histCounts[i]! / histMax) * 100),
-  }));
 
   const recentReject = last.reduce((s, w) => s + w.rejected, 0);
   const recentPass = last.reduce((s, w) => s + w.passed, 0);
@@ -416,16 +366,14 @@ function windowed(records: Rec[]) {
       cat: v.cat,
     }))
     .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label))
-    .slice(0, 7);
+    .slice(0, 6);
 
   return {
     windows: last,
     latP50,
     latP95,
-    latMax,
     latLast,
     latSamples: latencies.length,
-    latHist,
     rejectRate,
     passRate,
     signalsThru: signalsThru || recentPass,
