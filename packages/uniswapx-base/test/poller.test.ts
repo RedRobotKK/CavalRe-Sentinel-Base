@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { pollOpenOrders, type FetchFn } from "../src/poller.js";
 import { BASE_CHAIN_ID, BASE_USDC, BASE_WETH } from "../src/constants.js";
 
@@ -43,6 +43,7 @@ describe("pollOpenOrders", () => {
     expect(result.orders[0].orderHash).toBe("0xorder1");
     expect(result.rejections).toHaveLength(0);
     expect(typeof result.orders[0].inputStart).toBe("bigint");
+    expect(result.attempts).toBe(1);
   });
 
   it("surfaces rejections for malformed orders", async () => {
@@ -78,8 +79,41 @@ describe("pollOpenOrders", () => {
 
   it("throws on non-2xx response", async () => {
     await expect(
-      pollOpenOrders({ fetchFn: mockFetch({}, 500) })
+      pollOpenOrders({ fetchFn: mockFetch({}, 500), maxAttempts: 1 })
     ).rejects.toThrow("uniswapx_poll_failed:500");
+  });
+
+  it("retries transient network failure then succeeds", async () => {
+    let n = 0;
+    const wire = { orders: [] };
+    const fetchFn: FetchFn = async () => {
+      n += 1;
+      if (n === 1) {
+        throw new Error("fetch failed");
+      }
+      return new Response(JSON.stringify(wire), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    const result = await pollOpenOrders({
+      fetchFn,
+      maxAttempts: 3,
+      retryBackoffMs: 1,
+    });
+    expect(result.rawCount).toBe(0);
+    expect(result.attempts).toBe(2);
+    expect(n).toBe(2);
+  });
+
+  it("exhausts retries and surfaces cause", async () => {
+    const fetchFn: FetchFn = async () => {
+      throw new Error("fetch failed");
+    };
+    await expect(
+      pollOpenOrders({ fetchFn, maxAttempts: 2, retryBackoffMs: 1 })
+    ).rejects.toThrow(/uniswapx_poll_exhausted:fetch failed/);
   });
 
   it("handles empty orders array", async () => {

@@ -1,17 +1,22 @@
 #!/usr/bin/env node
 /**
  * VIEW mode — open channel on UniswapX + Base RPC. No signing.
+ * Phase B: seeds VirtualBooks so accepts post inventory when edge passes.
+ * Resilience: poller retries transient fetch; stdout shows drop reasons.
  */
 
 import { mkdir, appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DecisionJournal } from "@cavalre/journal";
 import { RiskEngine, defaultSmallCapitalConfig } from "@cavalre/risk-engine";
+import { VirtualBooks } from "@cavalre/strategy";
 import {
   createUniswapV3ReferenceCost,
   DEFAULT_BASE_RPC,
   BASE_DEFAULT_ORDER_TYPE,
   UNISWAPX_ORDERS_URL,
+  BASE_WETH,
+  BASE_USDC,
 } from "@cavalre/uniswapx-base";
 import { runCycle } from "@cavalre/runner";
 
@@ -30,10 +35,15 @@ const RPC = process.env.BASE_RPC_URL ?? DEFAULT_BASE_RPC;
 
 const risk = new RiskEngine(defaultSmallCapitalConfig());
 const journal = new DecisionJournal();
+const virtualBooks = new VirtualBooks();
+virtualBooks.seed(BASE_WETH, 100_000000000000000000n);
+virtualBooks.seed(BASE_USDC, 1_000_000_000000n);
+
 const referenceCostFn = createUniswapV3ReferenceCost({ rpcUrl: RPC });
 
 let running = true;
 let cycles = 0;
+let consecutiveFetchErrors = 0;
 
 function stamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
@@ -53,12 +63,43 @@ async function flushNewRecords(prevSize) {
   await appendFile(journalPath, lines, "utf8");
 }
 
+function recentDropReasons(limit = 8) {
+  const rows = journal
+    .all()
+    .filter((r) => r.kind === "quote_rejected" || r.kind === "quote_accepted")
+    .slice(-limit);
+  return rows.map((r) => ({
+    kind: r.kind,
+    reason: r.reason,
+    class: r.context?.orderClass ?? null,
+    edgeBps: r.context?.edgeBps ?? null,
+    ref: typeof r.ref === "string" ? r.ref.slice(0, 12) : null,
+  }));
+}
+
+function errorDetail(err) {
+  const parts = [];
+  let cur = err;
+  let d = 0;
+  while (cur && d < 4) {
+    if (cur instanceof Error) {
+      parts.push(cur.message);
+      cur = cur.cause;
+    } else {
+      parts.push(String(cur));
+      break;
+    }
+    d += 1;
+  }
+  return parts.join(" | ");
+}
+
 async function cycle() {
   const before = journal.size();
   const t0 = performance.now();
   try {
     const result = await runCycle(
-      { risk, journal },
+      { risk, journal, virtualBooks },
       {
         pollLimit: POLL_LIMIT,
         orderType: ORDER_TYPE,
@@ -66,6 +107,7 @@ async function cycle() {
       }
     );
     const latencyMs = Math.round(performance.now() - t0);
+    consecutiveFetchErrors = 0;
 
     journal.append({
       kind: "info",
@@ -84,38 +126,52 @@ async function cycle() {
         cycle: String(cycles + 1),
         latencyMs: String(latencyMs),
         requestUrl: result.requestUrl ?? null,
+        booksRows: result.booksSnapshot
+          ? String(result.booksSnapshot.length)
+          : "0",
       },
     });
 
     await flushNewRecords(before);
     cycles += 1;
-    console.log(
-      JSON.stringify({
-        ts: new Date().toISOString(),
-        mode: "view",
-        network: "base-mainnet",
-        chainId: 8453,
-        orderType: ORDER_TYPE,
-        cycle: cycles,
-        raw: result.rawCount,
-        accepted: result.accepted,
-        rejected: result.rejected,
-        waited: result.waited,
-        latencyMs,
-        halted: result.halted,
-        journalSize: journal.size(),
-        file: journalPath,
-      })
-    );
+
+    const line = {
+      ts: new Date().toISOString(),
+      mode: "view",
+      network: "base-mainnet",
+      chainId: 8453,
+      orderType: ORDER_TYPE,
+      cycle: cycles,
+      raw: result.rawCount,
+      accepted: result.accepted,
+      rejected: result.rejected,
+      waited: result.waited,
+      latencyMs,
+      halted: result.halted,
+      journalSize: journal.size(),
+      file: journalPath,
+    };
+
+    if (result.rawCount > 0 || result.rejected > 0 || result.accepted > 0) {
+      line.drops = recentDropReasons(12);
+    }
+    if (result.booksSnapshot) {
+      line.books = result.booksSnapshot;
+    }
+
+    console.log(JSON.stringify(line));
   } catch (err) {
     const latencyMs = Math.round(performance.now() - t0);
+    consecutiveFetchErrors += 1;
+    const detail = errorDetail(err);
     console.error(
       JSON.stringify({
         ts: new Date().toISOString(),
         level: "error",
         mode: "view",
         latencyMs,
-        message: err instanceof Error ? err.message : String(err),
+        consecutiveFetchErrors,
+        message: detail,
       })
     );
     journal.append({
@@ -126,7 +182,8 @@ async function cycle() {
         mode: "view",
         stage: "poll",
         latencyMs: String(latencyMs),
-        error: err instanceof Error ? err.message.slice(0, 120) : String(err).slice(0, 120),
+        consecutiveFetchErrors: String(consecutiveFetchErrors),
+        error: detail.slice(0, 200),
       },
     });
     await flushNewRecords(before);
@@ -162,11 +219,17 @@ console.error(
     pollLimit: POLL_LIMIT,
     journalPath,
     liveCapital: false,
+    booksSeed: virtualBooks.snapshot(),
   })
 );
 
 while (running) {
   await cycle();
   if (!running) break;
-  await new Promise((r) => setTimeout(r, INTERVAL_SEC * 1000));
+  // Back off harder after a streak of transport failures
+  const extra =
+    consecutiveFetchErrors >= 3
+      ? Math.min(60, consecutiveFetchErrors * 5)
+      : 0;
+  await new Promise((r) => setTimeout(r, (INTERVAL_SEC + extra) * 1000));
 }
