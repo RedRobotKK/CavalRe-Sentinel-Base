@@ -70,3 +70,22 @@ export {
   type BookEntry,
   type SleeveId,
 } from "./virtual-books.js";
+export {
+  normalize,
+  from as floatFrom,
+  toFloat,
+  toUInt,
+  plus,
+  minus,
+  times,
+  divide,
+  align,
+  shift,
+  isEQ,
+  isGT,
+  isZero,
+  edgeBpsFloat,
+  FLOAT_ZERO,
+  FloatLibError,
+  type Float,
+} from "./floatlib.js";
