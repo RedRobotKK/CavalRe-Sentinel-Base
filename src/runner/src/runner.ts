@@ -5,6 +5,8 @@ import {
   classifyOrder,
   isTradableClass,
   evaluateDutchAuction,
+  assertModeAllowed,
+  DEFAULT_GO_NO_GO,
 } from "@cavalre/strategy";
 import type {
   RunnerConfig,
@@ -19,9 +21,8 @@ export async function runCycle(
 ): Promise<CycleResult> {
   const mode: RunnerMode = config.mode ?? "dry-run";
 
-  if (mode === "live") {
-    throw new Error("live_mode_not_enabled");
-  }
+  // Phase D hard gate — live requires full Go/No-Go evidence (default all false)
+  assertModeAllowed(mode, config.goNoGo ?? DEFAULT_GO_NO_GO);
 
   const nowSec = config.nowSec ?? Math.floor(Date.now() / 1000);
 

@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 /**
  * VIEW mode — open channel on UniswapX + Base RPC. No signing.
+ * Phase B: seeds VirtualBooks so accepts post inventory when edge passes.
  */
 
 import { mkdir, appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DecisionJournal } from "@cavalre/journal";
 import { RiskEngine, defaultSmallCapitalConfig } from "@cavalre/risk-engine";
+import { VirtualBooks } from "@cavalre/strategy";
 import {
   createUniswapV3ReferenceCost,
   DEFAULT_BASE_RPC,
   BASE_DEFAULT_ORDER_TYPE,
   UNISWAPX_ORDERS_URL,
+  BASE_WETH,
+  BASE_USDC,
 } from "@cavalre/uniswapx-base";
 import { runCycle } from "@cavalre/runner";
 
@@ -30,6 +34,11 @@ const RPC = process.env.BASE_RPC_URL ?? DEFAULT_BASE_RPC;
 
 const risk = new RiskEngine(defaultSmallCapitalConfig());
 const journal = new DecisionJournal();
+const virtualBooks = new VirtualBooks();
+// Research inventory — enables postAccept on real accepts (Phase B mirror)
+virtualBooks.seed(BASE_WETH, 100_000000000000000000n); // 100 WETH
+virtualBooks.seed(BASE_USDC, 1_000_000_000000n); // 1M USDC (6dp)
+
 const referenceCostFn = createUniswapV3ReferenceCost({ rpcUrl: RPC });
 
 let running = true;
@@ -58,7 +67,7 @@ async function cycle() {
   const t0 = performance.now();
   try {
     const result = await runCycle(
-      { risk, journal },
+      { risk, journal, virtualBooks },
       {
         pollLimit: POLL_LIMIT,
         orderType: ORDER_TYPE,
@@ -84,6 +93,9 @@ async function cycle() {
         cycle: String(cycles + 1),
         latencyMs: String(latencyMs),
         requestUrl: result.requestUrl ?? null,
+        booksRows: result.booksSnapshot
+          ? String(result.booksSnapshot.length)
+          : "0",
       },
     });
 
@@ -105,6 +117,7 @@ async function cycle() {
         halted: result.halted,
         journalSize: journal.size(),
         file: journalPath,
+        books: result.booksSnapshot ?? null,
       })
     );
   } catch (err) {
@@ -162,6 +175,7 @@ console.error(
     pollLimit: POLL_LIMIT,
     journalPath,
     liveCapital: false,
+    booksSeed: virtualBooks.snapshot(),
   })
 );
 

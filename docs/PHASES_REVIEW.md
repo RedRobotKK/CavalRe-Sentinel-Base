@@ -10,12 +10,12 @@
 | Phase | Intent | Code | Tests | Live capital | Wallet role |
 |-------|--------|------|-------|--------------|-------------|
 | **A** Policy spec | FloatLib + Ledger vocabulary locked | `phase-a-spec.ts` | ✓ | No | Optional display address |
-| **B** Virtual books | Off-chain root×sleeve inventory | `virtual-books.ts` | ✓ | No | Optional; books ≠ keys |
+| **B** Virtual books | Off-chain root×sleeve inventory | `virtual-books.ts` + runner wire | ✓ | No | Optional; books ≠ keys |
 | **C** FloatLib TS | 21-digit ratio math subset | `floatlib.ts` | ✓ | No | None required |
-| **D** Live scaffold | Go/No-Go gate + plan | `phase-d-live.ts` | ✓ | **Gated** | **Signer required for live** |
+| **D** Live scaffold | Go/No-Go gate + plan | `phase-d-live.ts` + runner `assertModeAllowed` | ✓ | **Gated** | **Signer required for live** |
 | **E** Product | Claim/internal sleeves | Spec only | — | After D | Signer + Ledger product |
 
-**Dry-run / Desk today operate at A–C capability with D gate in place.** Runner `mode: live` remains blocked.
+**Dry-run / Desk today operate at A–C capability with D gate in place.** Runner `mode: live` remains blocked unless every `GoNoGoEvidence` field is true (including `humanSignOff`).
 
 ---
 
@@ -82,8 +82,9 @@ Implementation: `packages/wallet/src/lifecycle.ts` + `test/lifecycle.test.ts`.
 
 | Gap | Priority |
 |-----|----------|
-| Wire `resolveWalletSession` into desk `/meta` | Medium |
-| Dry-run optional `postAccept` on VirtualBooks when accept | Medium |
+| ~~Dry-run optional `postAccept` on VirtualBooks when accept~~ | **Done** (runner + dry-run + sim + TDD) |
+| ~~Wire Phase D `assertModeAllowed` into runner~~ | **Done** |
+| Desk `/meta` wallet session | Done (inlined view/none in desk-api) |
 | Full FloatLib forge parity tests | Low until markout needs it |
 | Deploy scripts for Dispatcher+Ledger | After Go sign-off |
 | Phase E claim-token product flows | After D live stable |
@@ -94,6 +95,7 @@ Implementation: `packages/wallet/src/lifecycle.ts` + `test/lifecycle.test.ts`.
 
 ```bash
 npm run test:strategy   # phases A–D strategy
+npm run test -w @cavalre/runner   # books + live gate
 npm run test -w @cavalre/wallet   # includes lifecycle
 ```
 
