@@ -66,9 +66,11 @@ export {
 export {
   VirtualBooks,
   VirtualBooksError,
+  SOURCE_SLEEVE,
   type AccountRef,
   type BookEntry,
   type SleeveId,
+  type LedgerSide,
 } from "./virtual-books.js";
 export {
   normalize,
