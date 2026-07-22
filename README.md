@@ -11,7 +11,8 @@ Selective Dutch · Amount-safe math · Fail-closed risk · Journal-first desk ·
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Chain](https://img.shields.io/badge/chain-Base%208453-0052FF)](https://base.org)
 [![Posture](https://img.shields.io/badge/live%20capital-OFF-red)](docs/GO_NO_GO.md)
-[![Phase A](https://img.shields.io/badge/Phase%20A-policy%20spec-goldenrod)](docs/PHASE_A.md)
+[![Phase A](https://img.shields.io/badge/Phase%20A-done-goldenrod)](docs/PHASE_A.md)
+[![Phase B](https://img.shields.io/badge/Phase%20B-virtual%20books-goldenrod)](docs/PHASE_B.md)
 
 [Quick start](#quick-start) · [Phases](#integration-phases-a--e) · [Math](#core-math) · [Architecture](#architecture) · [Desk](#sentinel-desk) · [Screenshots](#screenshots) · [Docs](#documentation)
 
@@ -28,6 +29,7 @@ This stack optimizes for **survival of small capital**:
 - **Edge is computed** against Uniswap v3 QuoterV2 — never assumed  
 - **Dutch decay is resolved before** risk and policy  
 - **Post-exclusive** Dutch can trade after `decayStartTime` (exclusivity proxy)  
+- **Virtual books** mirror Ledger sleeves before any on-chain capital  
 - The **journal is the book**; the desk only visualizes what was written  
 - **Live mode is hard-disabled** until [`docs/GO_NO_GO.md`](docs/GO_NO_GO.md) clears  
 
@@ -51,15 +53,13 @@ A Policy spec ──► B Virtual books ──► C FloatLib port
 
 | Phase | Name | Status | Live capital | What ships |
 |-------|------|--------|--------------|------------|
-| **A** | Policy spec | **Done** | No | FloatLib constants, Ledger→policy map, phase ladder in code + [PHASE_A.md](docs/PHASE_A.md) |
-| **B** | Virtual books | Next | No | Journal accepts → ledger-shaped accounts (off-chain mirror) |
-| **C** | FloatLib port | Planned | No | TS Float ops verified against forge tests |
-| **D** | Live capital | Gated | **Yes*** | Dispatcher + Ledger on Base; filler module on accept |
+| **A** | Policy spec | **Done** | No | FloatLib constants, Ledger→policy map — [PHASE_A.md](docs/PHASE_A.md) |
+| **B** | Virtual books | **Done** | No | `VirtualBooks` sleeves + postAccept — [PHASE_B.md](docs/PHASE_B.md) |
+| **C** | FloatLib port | Next | No | TS Float ops verified against forge tests |
+| **D** | Live capital | Gated | **Yes*** | Dispatcher + Ledger on Base |
 | **E** | Product | Planned | Yes* | Claim/internal PnL sleeves |
 
-\*Only after [GO_NO_GO.md](docs/GO_NO_GO.md). Runner throws `live_mode_not_enabled` until then.
-
-Encoded in `@cavalre/strategy` as `INTEGRATION_PHASES` — tests fail if the ladder drifts.
+\*Only after [GO_NO_GO.md](docs/GO_NO_GO.md).
 
 ---
 
@@ -98,29 +98,22 @@ npm run float-compare   # IEEE vs bigint research only — not FloatLib
 
 ## Screenshots
 
-Operator captures (commit under `docs/assets/` when available):
-
 | Asset | Capture |
 |-------|---------|
-| `docs/assets/desk-circuit.png` | Hero circuit / pipeline at http://127.0.0.1:5173 |
+| `docs/assets/desk-circuit.png` | Hero circuit at http://127.0.0.1:5173 |
 | `docs/assets/desk-drops.png` | Drop-reasons ranked list |
 | `docs/assets/desk-intent-log.png` | Human-readable intent log |
 | `docs/assets/dry-run-terminal.png` | `npm run dry-run` heartbeats |
 
 ```bash
-# with stack running:
-# open http://127.0.0.1:5173 → screenshot → save as above
 mkdir -p docs/assets
 ```
-
-Until assets are committed, the desk and terminal are the live “screenshots.”
 
 ---
 
 ## Core math
 
-All value-bearing quantities are **non-negative integers** (`Amount` = `bigint`).  
-No JavaScript `Number` for notionals.
+All value-bearing quantities are **non-negative integers** (`Amount` = `bigint`).
 
 ### Linear Dutch decay
 
@@ -139,10 +132,6 @@ $$
 e_{\mathrm{bps}} = \left\lfloor \frac{(O_{\mathrm{ref}} - O_{\mathrm{res}}) \cdot 10^{4}}{O_{\mathrm{ref}}} \right\rfloor
 $$
 
-$O_{\mathrm{ref}} = 0$ ⇒ **reject** (fail-closed).
-
-FloatLib (21 significant digits) is the **root of trust** for future ratio ports — see [PHASE_A.md](docs/PHASE_A.md).
-
 ---
 
 ## Architecture
@@ -151,19 +140,21 @@ FloatLib (21 significant digits) is the **root of trust** for future ratio ports
 flowchart LR
   API[UniswapX Orders API] --> POLL[poll + parse]
   POLL --> CLS[classify + exclusivity proxy]
-  CLS -->|exclusive / priority / unknown| REJ[reject + journal]
+  CLS -->|exclusive / priority| REJ[reject + journal]
   CLS -->|dutch| AUC[evaluateDutchAuction]
   AUC --> Q[QuoterV2 ref]
   Q --> POL[accept / wait / reject]
+  POL -->|accept| VB[VirtualBooks postAccept]
   POL --> J[(DecisionJournal)]
+  VB --> J
   J --> DESK[Sentinel Desk]
-  J --> SHADOW[shadow-markout]
 ```
 
 ### Compliant cycle
 
 ```text
 classify(now) → quote ref → evaluateDutchAuction → journal
+                                         ↘ VirtualBooks (Phase B)
 ```
 
 ---
@@ -172,8 +163,8 @@ classify(now) → quote ref → evaluateDutchAuction → journal
 
 | Source | Role |
 |--------|------|
-| [CavalRe/cavalre-contracts](https://github.com/CavalRe/cavalre-contracts) | FloatLib, Ledger — [TRUST_CAVALRE_CONTRACTS](docs/TRUST_CAVALRE_CONTRACTS.md) · [TRUST](docs/TRUST.md) |
-| [Uniswap/UniswapX](https://github.com/Uniswap/UniswapX) | Reactors, decay — [TRUST_UNISWAPX](docs/TRUST_UNISWAPX.md) |
+| [CavalRe/cavalre-contracts](https://github.com/CavalRe/cavalre-contracts) | FloatLib, Ledger |
+| [Uniswap/UniswapX](https://github.com/Uniswap/UniswapX) | Reactors, decay |
 | This repository | Implementation under test |
 
 **NEVER TRUST, ALWAYS VERIFY.**
@@ -184,20 +175,11 @@ classify(now) → quote ref → evaluateDutchAuction → journal
 
 | Doc | Contents |
 |-----|----------|
-| [**PHASE_A.md**](docs/PHASE_A.md) | **Phase A policy spec (this milestone)** |
+| [PHASE_A.md](docs/PHASE_A.md) | Policy spec |
+| [**PHASE_B.md**](docs/PHASE_B.md) | **Virtual books** |
 | [TRUST_CAVALRE_CONTRACTS.md](docs/TRUST_CAVALRE_CONTRACTS.md) | Float / Ledger primitives |
 | [GO_NO_GO.md](docs/GO_NO_GO.md) | Live capital gates |
-| [STRATEGY_DUTCH_LOW_CAPITAL.md](docs/STRATEGY_DUTCH_LOW_CAPITAL.md) | Low-capital Dutch policy |
-| [DESK.md](docs/DESK.md) | Desk design |
-| [MAINNET_DRY_RUN.md](docs/MAINNET_DRY_RUN.md) | Operator runbook |
 | [docs/README.md](docs/README.md) | Full index |
-
----
-
-## Related
-
-- [cavalre-contracts](https://github.com/CavalRe/cavalre-contracts) — FloatLib + accounting source of truth  
-- [UniswapX](https://github.com/Uniswap/UniswapX) — settlement protocol  
 
 ---
 

@@ -63,3 +63,10 @@ export {
   type IntegrationPhase,
   type PhaseDefinition,
 } from "./phase-a-spec.js";
+export {
+  VirtualBooks,
+  VirtualBooksError,
+  type AccountRef,
+  type BookEntry,
+  type SleeveId,
+} from "./virtual-books.js";
