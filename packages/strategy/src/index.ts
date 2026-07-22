@@ -17,6 +17,7 @@ export {
 } from "./fill-policy.js";
 export {
   classifyOrder,
+  isExclusiveWindowOpen,
   isTradableClass,
   type OrderClass,
   type ClassifiableOrder,
