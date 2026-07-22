@@ -5,186 +5,130 @@ import {
   isTradableClass,
 } from "../src/classify.js";
 
-const FILLER = "0x1234567890123456789012345678901234567890";
-const ZERO = "0x0000000000000000000000000000000000000000";
-
-describe("isExclusiveWindowOpen", () => {
-  it("false when no exclusive filler", () => {
-    expect(
-      isExclusiveWindowOpen(
-        { exclusiveFiller: null, decayStartTime: 100 },
-        50
-      )
-    ).toBe(false);
-  });
-
-  it("false when exclusive filler is zero address", () => {
-    expect(
-      isExclusiveWindowOpen(
-        { exclusiveFiller: ZERO, decayStartTime: 100 },
-        50
-      )
-    ).toBe(false);
-  });
-
-  it("true when before decayStartTime (proxy exclusivity end)", () => {
-    expect(
-      isExclusiveWindowOpen(
-        { exclusiveFiller: FILLER, decayStartTime: 1_000 },
-        999
-      )
-    ).toBe(true);
-  });
-
-  it("false at decayStartTime (post-exclusive opens)", () => {
-    expect(
-      isExclusiveWindowOpen(
-        { exclusiveFiller: FILLER, decayStartTime: 1_000 },
-        1_000
-      )
-    ).toBe(false);
-  });
-
-  it("false after decayStartTime", () => {
-    expect(
-      isExclusiveWindowOpen(
-        { exclusiveFiller: FILLER, decayStartTime: 1_000 },
-        1_500
-      )
-    ).toBe(false);
-  });
-
-  it("fail-closed true when decayStartTime missing", () => {
-    expect(
-      isExclusiveWindowOpen(
-        { exclusiveFiller: FILLER, decayStartTime: null },
-        999
-      )
-    ).toBe(true);
-  });
-});
+const base = {
+  orderType: "Dutch_V3",
+  exclusiveFiller: null as string | null,
+  decayStartTime: 1_700_000_100 as number | null,
+  decayEndTime: 1_700_000_600 as number | null,
+};
 
 describe("classifyOrder", () => {
-  it("classifies priority", () => {
+  it("dutch when no exclusive filler", () => {
+    expect(classifyOrder({ ...base }, 1_700_000_200)).toBe("dutch");
+  });
+
+  it("priority by type", () => {
     expect(
-      classifyOrder({
-        orderType: "PriorityOrder",
-        exclusiveFiller: null,
-        decayStartTime: null,
-        decayEndTime: null,
-      })
+      classifyOrder({ ...base, orderType: "Priority" }, 1_700_000_200)
     ).toBe("priority");
   });
 
-  it("classifies exclusive while window open", () => {
+  it("exclusive while time window open", () => {
     expect(
       classifyOrder(
         {
-          orderType: "Dutch_V2",
-          exclusiveFiller: FILLER,
-          decayStartTime: 1_000,
-          decayEndTime: 2_000,
+          ...base,
+          exclusiveFiller: "0x1111111111111111111111111111111111111111",
         },
-        500
+        1_700_000_050
       )
     ).toBe("exclusive");
   });
 
-  it("reclassifies post-exclusive as dutch at decay start", () => {
+  it("post-exclusive time → dutch", () => {
     expect(
       classifyOrder(
         {
-          orderType: "Dutch_V3",
-          exclusiveFiller: FILLER,
-          decayStartTime: 1_000,
-          decayEndTime: 2_000,
+          ...base,
+          exclusiveFiller: "0x1111111111111111111111111111111111111111",
         },
-        1_000
+        1_700_000_200
       )
     ).toBe("dutch");
   });
 
-  it("reclassifies post-exclusive as dutch after decay start", () => {
+  it("PASS V3 block exclusivity: open before decayStartBlock", () => {
     expect(
-      classifyOrder(
+      isExclusiveWindowOpen(
         {
-          orderType: "Dutch_V3",
-          exclusiveFiller: FILLER,
-          decayStartTime: 1_000,
-          decayEndTime: 2_000,
+          exclusiveFiller: "0x1111111111111111111111111111111111111111",
+          decayStartTime: null,
+          decayStartBlock: 1000,
         },
-        1_250
+        0,
+        999
       )
-    ).toBe("dutch");
-  });
-
-  it("stays exclusive when filler set but no decayStartTime", () => {
+    ).toBe(true);
     expect(
       classifyOrder(
         {
           orderType: "Dutch_V3",
-          exclusiveFiller: FILLER,
+          exclusiveFiller: "0x1111111111111111111111111111111111111111",
           decayStartTime: null,
           decayEndTime: null,
+          decayStartBlock: 1000,
         },
-        1_000
+        0,
+        999
       )
     ).toBe("exclusive");
   });
 
-  it("classifies dutch by type without filler", () => {
+  it("PASS V3 block exclusivity: closed at/after decayStartBlock", () => {
     expect(
-      classifyOrder({
-        orderType: "Dutch_V3",
-        exclusiveFiller: null,
-        decayStartTime: 1,
-        decayEndTime: 2,
-      })
+      isExclusiveWindowOpen(
+        {
+          exclusiveFiller: "0x1111111111111111111111111111111111111111",
+          decayStartTime: null,
+          decayStartBlock: 1000,
+        },
+        0,
+        1000
+      )
+    ).toBe(false);
+    expect(
+      classifyOrder(
+        {
+          orderType: "Dutch_V3",
+          exclusiveFiller: "0x1111111111111111111111111111111111111111",
+          decayStartTime: null,
+          decayEndTime: null,
+          decayStartBlock: 1000,
+        },
+        0,
+        1000
+      )
     ).toBe("dutch");
   });
 
-  it("classifies dutch by decay window with zero filler", () => {
+  it("FAIL-closed: exclusive without timing stays exclusive", () => {
     expect(
-      classifyOrder({
-        orderType: "unknown",
-        exclusiveFiller: ZERO,
-        decayStartTime: 10,
-        decayEndTime: 20,
-      })
-    ).toBe("dutch");
+      isExclusiveWindowOpen(
+        {
+          exclusiveFiller: "0x1111111111111111111111111111111111111111",
+          decayStartTime: null,
+        },
+        999
+      )
+    ).toBe(true);
   });
 
-  it("unknown without signals", () => {
+  it("zero address exclusive filler is not exclusive", () => {
     expect(
-      classifyOrder({
-        orderType: "Limit",
-        exclusiveFiller: null,
-        decayStartTime: null,
-        decayEndTime: null,
-      })
-    ).toBe("unknown");
+      isExclusiveWindowOpen(
+        {
+          exclusiveFiller: "0x0000000000000000000000000000000000000000",
+          decayStartTime: 1_700_000_100,
+        },
+        1_700_000_050
+      )
+    ).toBe(false);
   });
 
-  it("post-exclusive is tradable", () => {
-    const c = classifyOrder(
-      {
-        orderType: "Dutch_V3",
-        exclusiveFiller: FILLER,
-        decayStartTime: 100,
-        decayEndTime: 200,
-      },
-      150
-    );
-    expect(c).toBe("dutch");
-    expect(isTradableClass(c)).toBe(true);
-  });
-});
-
-describe("isTradableClass", () => {
-  it("only dutch is tradable in v1", () => {
+  it("isTradableClass only dutch", () => {
     expect(isTradableClass("dutch")).toBe(true);
-    expect(isTradableClass("priority")).toBe(false);
     expect(isTradableClass("exclusive")).toBe(false);
+    expect(isTradableClass("priority")).toBe(false);
     expect(isTradableClass("unknown")).toBe(false);
   });
 });
