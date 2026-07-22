@@ -1,5 +1,5 @@
 /**
- * Mainnet reference cost via Uniswap v3 Quoter on Base.
+ * Mainnet reference cost via Uniswap v3 QuoterV2 on Base.
  * eth_call only — no keys.
  */
 
@@ -31,7 +31,6 @@ function readBaseRpcFromEnv(): string | undefined {
 
 /**
  * Returns amountOut for best fee tier, or 0n with error diagnostic.
- * Kept as Amount-returning fn for backward compat via .amountOut wrapper.
  */
 export function createUniswapV3ReferenceCost(options: ReferenceCostOptions = {}) {
   const rpcUrl = options.rpcUrl ?? readBaseRpcFromEnv() ?? DEFAULT_BASE_RPC;
@@ -42,9 +41,8 @@ export function createUniswapV3ReferenceCost(options: ReferenceCostOptions = {})
     resolvedInput: Amount
   ): Promise<Amount> {
     const r = await quoteBest(fetchFn, rpcUrl, order, resolvedInput);
-    // stash last diagnostic on function for runner (non-enumerable)
-    (fn as any).lastError = r.error;
-    (fn as any).lastFee = r.feeUsed;
+    (fn as { lastError?: string | null }).lastError = r.error;
+    (fn as { lastFee?: number | null }).lastFee = r.feeUsed;
     return r.amountOut;
   };
 
@@ -61,6 +59,15 @@ export async function quoteBest(
     return { amountOut: 0n, feeUsed: null, error: "zero_input" };
   }
 
+  const tokenIn = normalizeAddr(order.inputToken);
+  const tokenOut = normalizeAddr(order.outputToken);
+  if (!tokenIn || !tokenOut) {
+    return { amountOut: 0n, feeUsed: null, error: "bad_token_addr" };
+  }
+  if (tokenIn === tokenOut) {
+    return { amountOut: 0n, feeUsed: null, error: "same_token" };
+  }
+
   let best: Amount = 0n;
   let feeUsed: number | null = null;
   const errors: string[] = [];
@@ -68,8 +75,8 @@ export async function quoteBest(
   for (const fee of V3_FEE_TIERS) {
     try {
       const out = await quoteExactInputSingleV2(fetchFn, rpcUrl, {
-        tokenIn: order.inputToken,
-        tokenOut: order.outputToken,
+        tokenIn,
+        tokenOut,
         amountIn,
         fee,
       });
@@ -79,11 +86,13 @@ export async function quoteBest(
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      errors.push(`v2_${fee}:${msg.slice(0, 40)}`);
+      // compress common revert noise
+      const short = msg
+        .replace(/execution reverted:?\s*/i, "rev:")
+        .replace(/\s+/g, "_")
+        .slice(0, 36);
+      errors.push(`${fee}:${short}`);
     }
-
-    // fallback: classic QuoterV1-style signature on same address often reverts;
-    // also try swapped direction is wrong for exact input of order — skip
   }
 
   if (best === 0n) {
@@ -97,7 +106,14 @@ export async function quoteBest(
   return { amountOut: best, feeUsed, error: null };
 }
 
-/** QuoterV2 quoteExactInputSingle((address,address,uint256,uint24,uint160)) */
+/**
+ * QuoterV2.quoteExactInputSingle(QuoteExactInputSingleParams)
+ * Params are a single *static* struct — encoded in place (no offset word).
+ *
+ * selector = bytes4(keccak256(
+ *   "quoteExactInputSingle((address,address,uint256,uint24,uint160))"
+ * )) = 0xc6a5026a
+ */
 async function quoteExactInputSingleV2(
   fetchFn: typeof fetch,
   rpcUrl: string,
@@ -108,17 +124,15 @@ async function quoteExactInputSingleV2(
     fee: number;
   }
 ): Promise<Amount> {
-  // selector = bytes4(keccak256("quoteExactInputSingle((address,address,uint256,uint24,uint160))"))
   const selector = "c6a5026a";
   const data =
     "0x" +
     selector +
-    encodeUint256(32n) +
     encodeAddress(p.tokenIn) +
     encodeAddress(p.tokenOut) +
     encodeUint256(p.amountIn) +
     encodeUint256(BigInt(p.fee)) +
-    encodeUint256(0n);
+    encodeUint256(0n); // sqrtPriceLimitX96 = 0 (no limit)
 
   const body = {
     jsonrpc: "2.0",
@@ -139,14 +153,22 @@ async function quoteExactInputSingleV2(
     result?: string;
     error?: { message: string };
   };
-  if (json.error) throw new Error(json.error.message.slice(0, 60));
+  if (json.error) throw new Error(json.error.message.slice(0, 80));
   if (!json.result || json.result === "0x") throw new Error("quote_empty");
 
   const hex = json.result.slice(2);
   if (hex.length < 64) throw new Error("quote_short");
+  // amountOut is the first return word
   const amountOut = BigInt("0x" + hex.slice(0, 64));
   if (amountOut === 0n) throw new Error("quote_zero");
   return amountOut;
+}
+
+function normalizeAddr(addr: string | null | undefined): string | null {
+  if (!addr || typeof addr !== "string") return null;
+  const a = addr.trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(a)) return null;
+  return a;
 }
 
 function encodeAddress(addr: string): string {
