@@ -24,16 +24,81 @@ const STAGES: { id: StageId; label: string }[] = [
 
 const PATH = STAGES.map((s) => s.id);
 
+const STAGE_LABEL: Record<StageId, string> = {
+  poll: "Poll",
+  parse: "Parse",
+  classify: "Classify",
+  decay: "Decay",
+  edge: "Edge",
+  risk: "Risk",
+  policy: "Policy",
+  book: "Book",
+};
+
 type Signal = {
   id: string;
   ts: string;
   ref: string;
   action: "accept" | "reject" | "wait";
+  reasonRaw: string;
   reason: string;
   orderClass: string;
   edgeBps: string;
+  edgeLabel: string;
   stage: StageId;
+  stageLabel: string;
 };
+
+/** Map machine reasons → short plain English */
+function humanReason(reason: string, orderClass: string): string {
+  const r = reason.trim();
+  if (r.startsWith("class_not_tradable:exclusive"))
+    return "Skipped — exclusive filler";
+  if (r.startsWith("class_not_tradable:priority"))
+    return "Skipped — priority order";
+  if (r.startsWith("class_not_tradable"))
+    return `Skipped — ${orderClass || "not tradable"}`;
+  if (r === "edge_ok") return "Edge above threshold";
+  if (r === "edge_negative") return "Edge negative vs AMM";
+  if (r === "edge_negative_wait_decay") return "Waiting — negative edge, still early";
+  if (r === "edge_below_min") return "Edge too thin";
+  if (r === "early_decay_thin_edge") return "Waiting — early in Dutch curve";
+  if (r === "toxicity_high") return "Toxicity too high";
+  if (r === "below_min_notional") return "Below minimum size";
+  if (r === "exceeds_max_position_size") return "Over max position";
+  if (r === "exceeds_current_equity") return "Over working capital";
+  if (r === "zero_notional") return "Zero size";
+  if (r.startsWith("edge_undefined")) {
+    const detail = r.replace(/^edge_undefined:?/, "").trim();
+    return detail
+      ? `No AMM quote (${detail.slice(0, 40)})`
+      : "No AMM reference quote";
+  }
+  if (r.includes("decay") || r.includes("IncorrectAmounts"))
+    return "Decay / amount error";
+  if (r.startsWith("risk")) return r.replace(/_/g, " ");
+  // fallback: snake → words
+  return r.replace(/_/g, " ").slice(0, 48);
+}
+
+function formatEdge(raw: string | null | undefined): { value: string; label: string } {
+  if (raw == null || raw === "" || raw === "—") {
+    return { value: "—", label: "—" };
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return { value: String(raw), label: String(raw) };
+  const sign = n > 0 ? "+" : "";
+  return {
+    value: String(raw),
+    label: `${sign}${n} bps`,
+  };
+}
+
+function shortRef(ref: string): string {
+  if (!ref || ref === "—") return "—";
+  if (ref.length <= 14) return ref;
+  return `${ref.slice(0, 8)}…${ref.slice(-4)}`;
+}
 
 function stageFrom(r: any): StageId {
   const stage = String(r?.context?.stage ?? "");
@@ -108,26 +173,34 @@ function build(records: any[]) {
 
     if (action === "reject") {
       drop[st] += 1;
-      for (let i = 0; i < idx; i++) pass[PATH[i]] += 1;
+      for (let i = 0; i < idx; i++) pass[PATH[i]!] += 1;
     } else {
       const end = action === "accept" ? PATH.length : PATH.indexOf("policy") + 1;
-      for (let i = 0; i < end; i++) pass[PATH[i]] += 1;
+      for (let i = 0; i < end; i++) pass[PATH[i]!] += 1;
       if (action === "accept") pass.book += 1;
     }
 
     const ref = String(r.ref ?? "");
+    const orderClass = String(r.context?.orderClass ?? "—");
+    const reasonRaw = String(r.reason ?? "");
+    const edge = formatEdge(
+      r.context?.edgeBps != null && r.context.edgeBps !== ""
+        ? String(r.context.edgeBps)
+        : null
+    );
+
     signals.push({
       id: `${r.seq ?? ""}-${r.ts ?? ""}-${ref}-${action}`,
       ts: r.ts?.slice(11, 19) ?? "—",
-      ref: ref ? ref.slice(0, 14) : "—",
+      ref: shortRef(ref),
       action,
-      reason: String(r.reason ?? "").slice(0, 56),
-      orderClass: String(r.context?.orderClass ?? "—"),
-      edgeBps:
-        r.context?.edgeBps != null && r.context.edgeBps !== ""
-          ? String(r.context.edgeBps)
-          : "—",
+      reasonRaw,
+      reason: humanReason(reasonRaw, orderClass),
+      orderClass,
+      edgeBps: edge.value,
+      edgeLabel: edge.label,
       stage: st,
+      stageLabel: STAGE_LABEL[st],
     });
   }
 
@@ -268,8 +341,19 @@ export function Circuit({
           <span>
             Intent signals <span className="live-dot" /> LIVE
           </span>
-          <span className="muted">newest first · rolling {m.log.length}/40</span>
+          <span className="muted">newest first · {m.log.length}/40</span>
         </div>
+
+        <div className="intent-cols">
+          <span>Time</span>
+          <span>Decision</span>
+          <span>Order</span>
+          <span>Type</span>
+          <span>Dropped at</span>
+          <span>Edge</span>
+          <span>Why</span>
+        </div>
+
         <div className="intent-log-body" ref={logRef}>
           {m.log.length === 0 && (
             <div className="intent-log-empty">channel open — waiting…</div>
@@ -278,16 +362,27 @@ export function Circuit({
             <div
               key={s.id}
               className={`intent-line ${s.action}${i === 0 ? " newest" : ""}`}
+              title={s.reasonRaw}
             >
               <span className="il-ts">{s.ts}</span>
               <span className={`il-action ${s.action}`}>{s.action}</span>
-              <span className="il-ref">{s.ref}</span>
-              <span className="il-class">{s.orderClass}</span>
-              <span className="il-stage">{s.stage}</span>
-              <span className="il-edge">e={s.edgeBps}</span>
-              <span className="il-reason" title={s.reason}>
-                {s.reason}
+              <span className="il-ref" title={s.ref}>
+                {s.ref}
               </span>
+              <span className="il-class">{s.orderClass}</span>
+              <span className="il-stage">{s.stageLabel}</span>
+              <span
+                className={`il-edge ${
+                  s.edgeBps !== "—" && Number(s.edgeBps) > 0
+                    ? "pos"
+                    : s.edgeBps !== "—" && Number(s.edgeBps) < 0
+                      ? "neg"
+                      : ""
+                }`}
+              >
+                {s.edgeLabel}
+              </span>
+              <span className="il-reason">{s.reason}</span>
             </div>
           ))}
         </div>
