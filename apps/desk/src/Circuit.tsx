@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PipelineScene } from "./gl/PipelineScene";
+import { PipelineWire } from "./PipelineWire";
 
 type StageId =
   | "poll"
@@ -49,7 +50,6 @@ type Signal = {
   stageLabel: string;
 };
 
-/** Map machine reasons → short plain English */
 function humanReason(reason: string, orderClass: string): string {
   const r = reason.trim();
   if (r.startsWith("class_not_tradable:exclusive"))
@@ -77,7 +77,6 @@ function humanReason(reason: string, orderClass: string): string {
   if (r.includes("decay") || r.includes("IncorrectAmounts"))
     return "Decay / amount error";
   if (r.startsWith("risk")) return r.replace(/_/g, " ");
-  // fallback: snake → words
   return r.replace(/_/g, " ").slice(0, 48);
 }
 
@@ -313,6 +312,7 @@ export function Circuit({
       </div>
 
       <div className="chain-stage chain-stage-3d">
+        <PipelineWire records={records} />
         <PipelineScene
           pulseKey={pulseKey}
           activeStage={activeStage}
