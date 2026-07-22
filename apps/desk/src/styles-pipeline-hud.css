@@ -1,0 +1,197 @@
+/* Iron Man HUD hotspots over 3D blocks */
+
+.pipeline-hud {
+  position: absolute;
+  inset: 12% 4% 18%;
+  z-index: 3;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 0;
+  pointer-events: none;
+}
+
+.hud-zone {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  pointer-events: auto;
+  cursor: crosshair;
+  outline: none;
+}
+
+.hud-reticle {
+  position: absolute;
+  inset: 8% 10%;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.hud-zone:hover .hud-reticle,
+.hud-zone.on .hud-reticle,
+.hud-zone:focus .hud-reticle {
+  opacity: 1;
+}
+
+.hud-corner {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: rgba(255, 190, 80, 0.85);
+  border-style: solid;
+  filter: drop-shadow(0 0 4px rgba(255, 160, 40, 0.7));
+}
+.hud-corner.tl {
+  top: 0;
+  left: 0;
+  border-width: 2px 0 0 2px;
+}
+.hud-corner.tr {
+  top: 0;
+  right: 0;
+  border-width: 2px 2px 0 0;
+}
+.hud-corner.bl {
+  bottom: 0;
+  left: 0;
+  border-width: 0 0 2px 2px;
+}
+.hud-corner.br {
+  bottom: 0;
+  right: 0;
+  border-width: 0 2px 2px 0;
+}
+
+.hud-callout {
+  position: absolute;
+  top: -8px;
+  min-width: 168px;
+  max-width: 220px;
+  padding: 10px 12px 12px;
+  background:
+    linear-gradient(165deg, rgba(40, 22, 8, 0.94), rgba(10, 5, 2, 0.96));
+  border: 1px solid rgba(255, 170, 50, 0.55);
+  box-shadow:
+    0 0 20px rgba(255, 140, 30, 0.25),
+    inset 0 0 24px rgba(255, 120, 20, 0.06);
+  pointer-events: none;
+  animation: hudIn 0.18s ease-out both;
+  font-family: "IBM Plex Mono", "VT323", ui-monospace, monospace;
+  z-index: 5;
+}
+.hud-callout.right {
+  left: 50%;
+  transform: translateX(-10%);
+}
+.hud-callout.left {
+  right: 50%;
+  left: auto;
+  transform: translateX(10%);
+}
+
+@keyframes hudIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.hud-callout-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 150, 40, 0.25);
+}
+.hud-tag {
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  font-weight: 700;
+  color: #ffd080;
+  text-shadow:
+    0 0 6px rgba(255, 180, 50, 0.9),
+    0 0 14px rgba(255, 140, 30, 0.5);
+}
+.hud-idx {
+  font-size: 10px;
+  color: rgba(255, 170, 60, 0.55);
+  letter-spacing: 0.1em;
+}
+
+.hud-metrics {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.hud-metric {
+  flex: 1;
+}
+.hud-metric em {
+  display: block;
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: rgba(255, 160, 50, 0.55);
+  margin-bottom: 2px;
+}
+.hud-metric strong {
+  font-size: 18px;
+  color: #ffc266;
+  text-shadow: 0 0 8px rgba(255, 176, 0, 0.45);
+}
+.hud-metric.drop strong {
+  color: #ff6644;
+  text-shadow: 0 0 8px rgba(255, 80, 40, 0.45);
+}
+
+.hud-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hud-lines li {
+  font-size: 10px;
+  line-height: 1.45;
+  color: rgba(255, 190, 100, 0.75);
+  letter-spacing: 0.03em;
+  border-top: 1px solid rgba(92, 51, 16, 0.35);
+  padding: 3px 0;
+}
+.hud-lines li::before {
+  content: "› ";
+  color: rgba(255, 160, 40, 0.55);
+}
+
+.hud-scan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 30%;
+  top: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 180, 60, 0.08),
+    transparent
+  );
+  animation: hudSweep 2.4s linear infinite;
+  pointer-events: none;
+}
+@keyframes hudSweep {
+  to {
+    top: 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  .hud-callout {
+    min-width: 140px;
+    max-width: 170px;
+    padding: 8px;
+  }
+  .hud-metric strong {
+    font-size: 15px;
+  }
+}
