@@ -81,17 +81,17 @@ function humanReason(reason: string, orderClass: string): string {
   return r.replace(/_/g, " ").slice(0, 48);
 }
 
+/** Display only — values are already floor-bps integers from strategy. */
 function formatEdge(raw: string | null | undefined): { value: string; label: string } {
   if (raw == null || raw === "" || raw === "—") {
     return { value: "—", label: "—" };
   }
   const n = Number(raw);
   if (!Number.isFinite(n)) return { value: String(raw), label: String(raw) };
-  const sign = n > 0 ? "+" : "";
-  return {
-    value: String(raw),
-    label: `${sign}${n} bps`,
-  };
+  // integer bps — matches edgeBps floor path (no CSS float math)
+  const i = Math.trunc(n);
+  const sign = i > 0 ? "+" : "";
+  return { value: String(i), label: `${sign}${i} bps` };
 }
 
 function shortRef(ref: string): string {
@@ -116,6 +116,12 @@ function stageFrom(r: any): StageId {
   if (r?.kind === "quote_accepted") return "book";
   if (r?.kind === "info" && r?.context?.policyAction === "wait") return "policy";
   return "parse";
+}
+
+function percentile(sorted: number[], p: number): number | null {
+  if (sorted.length === 0) return null;
+  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * p));
+  return sorted[idx]!;
 }
 
 function build(records: any[]) {
@@ -144,6 +150,9 @@ function build(records: any[]) {
   let edgeN = 0;
   let v3Path = 0;
   let v2Path = 0;
+  const latencies: number[] = [];
+  const rawSpark: number[] = [];
+  const edgeSpark: number[] = [];
   const signals: Signal[] = [];
   let lastHit: StageId = "poll";
 
@@ -152,6 +161,9 @@ function build(records: any[]) {
       heartbeats += 1;
       lastRaw = Number(r.context?.raw ?? lastRaw);
       pass.poll += 1;
+      const lat = Number(r.context?.latencyMs ?? NaN);
+      if (Number.isFinite(lat) && lat > 0) latencies.push(lat);
+      rawSpark.push(Math.max(0, Number(r.context?.raw ?? 0)));
       continue;
     }
 
@@ -187,8 +199,10 @@ function build(records: any[]) {
 
     const eb = r.context?.edgeBps;
     if (eb != null && eb !== "" && Number.isFinite(Number(eb))) {
-      edgeSum += Number(eb);
+      const v = Math.trunc(Number(eb)); // floor-aligned integer bps
+      edgeSum += v;
       edgeN += 1;
+      edgeSpark.push(Math.abs(v));
     }
 
     const st = stageFrom(r);
@@ -228,7 +242,14 @@ function build(records: any[]) {
   }
 
   const log = [...signals].reverse().slice(0, 40);
-  const meanEdge = edgeN > 0 ? Math.round(edgeSum / edgeN) : null;
+  const meanEdge = edgeN > 0 ? Math.trunc(edgeSum / edgeN) : null;
+  const sortedLat = [...latencies].sort((a, b) => a - b);
+  const latency = {
+    p50: percentile(sortedLat, 0.5),
+    p95: percentile(sortedLat, 0.95),
+    last: latencies.length ? latencies[latencies.length - 1]! : null,
+    n: latencies.length,
+  };
 
   const funnel = STAGES.map((s) => ({
     label: s.label,
@@ -242,11 +263,13 @@ function build(records: any[]) {
       label: "POLL",
       pass: pass.poll,
       drop: drop.poll,
+      spark: rawSpark.slice(-16),
+      latency,
       lines: [
         `heartbeats ${heartbeats}`,
         `last raw ${lastRaw}`,
-        `source UniswapX`,
-        `chain Base · Dutch_V3`,
+        latency.last != null ? `last poll ${Math.round(latency.last)}ms` : "last poll —",
+        `source UniswapX · Base`,
       ],
     },
     {
@@ -266,6 +289,7 @@ function build(records: any[]) {
       label: "CLASS",
       pass: pass.classify,
       drop: drop.classify,
+      spark: [exclusiveDrops, priorityDrops, drop.classify].map((n) => n || 0.01),
       lines: [
         `exclusive drops ${exclusiveDrops}`,
         `priority drops ${priorityDrops}`,
@@ -290,11 +314,14 @@ function build(records: any[]) {
       label: "EDGE",
       pass: pass.edge,
       drop: drop.edge,
+      spark: edgeSpark.slice(-16),
       lines: [
         `edge_ok ${edgeOk}`,
         `edge_negative ${edgeNeg}`,
-        meanEdge != null ? `mean edge ${meanEdge > 0 ? "+" : ""}${meanEdge} bps` : "mean edge —",
-        `ref QuoterV2 · floor div`,
+        meanEdge != null
+          ? `mean edge ${meanEdge > 0 ? "+" : ""}${meanEdge} bps`
+          : "mean edge —",
+        `floor bps · QuoterV2 ref`,
       ],
     },
     {
@@ -314,6 +341,7 @@ function build(records: any[]) {
       label: "POLICY",
       pass: pass.policy,
       drop: drop.policy,
+      spark: [accept, wait, reject].map((n) => n || 0.01),
       lines: [
         `accept ${accept}`,
         `wait ${wait}`,
@@ -348,6 +376,7 @@ function build(records: any[]) {
     log,
     lastHit,
     live: records.length > 0,
+    latency,
   };
 }
 
@@ -416,6 +445,11 @@ export function Circuit({
           <span>
             <em>hb</em> {m.heartbeats}
           </span>
+          {m.latency.last != null && (
+            <span className="ok">
+              <em>lat</em> {Math.round(m.latency.last)}ms
+            </span>
+          )}
           <span className="ok">
             <em>A</em> {m.accept}
           </span>
@@ -433,6 +467,7 @@ export function Circuit({
         <span className="pass-banner-n">{m.signalsThrough}</span>
         <span className="pass-banner-sub">
           accept {m.accept} · wait {m.wait} · dropped {m.reject}
+          {m.latency.p95 != null ? ` · p95 ${Math.round(m.latency.p95)}ms` : ""}
         </span>
       </div>
 
