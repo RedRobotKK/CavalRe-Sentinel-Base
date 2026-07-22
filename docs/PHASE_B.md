@@ -1,6 +1,6 @@
 # Phase B — Virtual books (off-chain Ledger mirror)
 
-> **Status:** Implemented (`VirtualBooks` in `@cavalre/strategy`)  
+> **Status:** Implemented (`VirtualBooks` in `@cavalre/strategy`) + **wired into runner / dry-run / simulate**  
 > **Live capital:** OFF  
 > **Depends on:** [Phase A](./PHASE_A.md)  
 > **TRUST:** [cavalre-contracts Ledger](https://github.com/CavalRe/cavalre-contracts/tree/main/modules/ledger)
@@ -47,19 +47,34 @@ postAccept({
 
 If output sleeve cannot cover obligation → throw (same class of refusal as RiskEngine equity gate).
 
+On the **research path** the runner still journals `quote_accepted` and records `context.virtualBooks` (`posted` | policy reason).
+
+---
+
+## Wiring (done)
+
+| Surface | Behavior |
+|---------|----------|
+| `runCycle` | Optional `deps.virtualBooks`; postAccept on accept |
+| `npm run simulate` | Seeds WETH/USDC, passes books |
+| `npm run dry-run` | Seeds research inventory, snapshots books on heartbeat |
+| Runner tests | postAccept balance asserts + short inventory note |
+
 ---
 
 ## What this does not do
 
 - No chain txs, no Dispatcher, no real ERC-20 moves  
-- Does not auto-wire dry-run yet (call from runner/sim when ready)  
 - Not FloatLib arithmetic  
+- Does not unlock live capital  
 
 ---
 
 ## TDD
 
 ```bash
+npm run test -w @cavalre/runner
+# Phase B VirtualBooks cases in runner.test.ts
 npm run test:strategy
 # virtual-books.test.ts
 ```
@@ -68,5 +83,5 @@ npm run test:strategy
 
 ## Next
 
-- Optional: dry-run / simulate call `postAccept` on `quote_accepted`  
-- **Phase C** — FloatLib TS port for edge/markout ratios  
+- **Phase C** — FloatLib TS port for edge/markout ratios (shipped; optional flag)  
+- **Phase D** — `assertModeAllowed` gate already in runner; live still NO-GO until evidence  

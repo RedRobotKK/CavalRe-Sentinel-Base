@@ -2,7 +2,7 @@ import type { DecisionJournal } from "@cavalre/journal";
 import type { RiskEngine } from "@cavalre/risk-engine";
 import type { FetchFn, ParsedOrder } from "@cavalre/uniswapx-base";
 import type { Amount } from "@cavalre/core";
-import type { VirtualBooks } from "@cavalre/strategy";
+import type { VirtualBooks, GoNoGoEvidence } from "@cavalre/strategy";
 
 export type RunnerMode = "dry-run" | "live";
 
@@ -19,6 +19,8 @@ export interface RunnerConfig {
   orderType?: string;
   nowSec?: number;
   referenceCostFn?: ReferenceCostFn;
+  /** Phase D: evidence for assertModeAllowed when mode=live */
+  goNoGo?: GoNoGoEvidence;
 }
 
 export interface RunnerDeps {

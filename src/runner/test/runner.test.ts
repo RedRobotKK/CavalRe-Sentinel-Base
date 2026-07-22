@@ -4,6 +4,7 @@ import { DecisionJournal } from "@cavalre/journal";
 import { RiskEngine, defaultSmallCapitalConfig } from "@cavalre/risk-engine";
 import { BASE_CHAIN_ID, BASE_USDC, BASE_WETH } from "@cavalre/uniswapx-base";
 import type { FetchFn } from "@cavalre/uniswapx-base";
+import { VirtualBooks, LIVE_MODE_ERROR, type GoNoGoEvidence } from "@cavalre/strategy";
 import { runCycle } from "../src/runner.js";
 
 function mockFetch(body: unknown, status = 200): FetchFn {
@@ -37,6 +38,18 @@ function makeDutch(hash: string, inputStart: string, outputStart: string) {
     ],
   };
 }
+
+const FULL_GO: GoNoGoEvidence = {
+  dryRunDaysGte7: true,
+  shadowAcceptsGte100: true,
+  meanMarkoutBpsGte0: true,
+  medianMarkoutBpsGteNeg5: true,
+  toxicFractionLte25pct: true,
+  worstDayPnlWithinBound: true,
+  noKeyLeakage: true,
+  priorityPolicyOk: true,
+  humanSignOff: true,
+};
 
 describe("runCycle (compliant dry-run)", () => {
   let risk: RiskEngine;
@@ -125,10 +138,33 @@ describe("runCycle (compliant dry-run)", () => {
     ).toBe(true);
   });
 
-  it("refuses live mode", async () => {
+  it("refuses live mode without Go/No-Go evidence (Phase D gate)", async () => {
     await expect(
       runCycle({ risk, journal }, { mode: "live" })
-    ).rejects.toThrow("live_mode_not_enabled");
+    ).rejects.toThrow(LIVE_MODE_ERROR);
+  });
+
+  it("still refuses live when only partial evidence is set", async () => {
+    await expect(
+      runCycle(
+        { risk, journal },
+        { mode: "live", goNoGo: { ...FULL_GO, humanSignOff: false } }
+      )
+    ).rejects.toThrow(LIVE_MODE_ERROR);
+  });
+
+  it("allows live mode only when every Go/No-Go gate is true", async () => {
+    // Live still needs a fetch; empty book is fine — gate is the point under test
+    const result = await runCycle(
+      { risk, journal },
+      {
+        mode: "live",
+        goNoGo: FULL_GO,
+        fetchFn: mockFetch({ orders: [] }),
+      }
+    );
+    expect(result.mode).toBe("live");
+    expect(result.rawCount).toBe(0);
   });
 
   it("short-circuits when halted", async () => {
@@ -140,5 +176,59 @@ describe("runCycle (compliant dry-run)", () => {
     );
     expect(result.halted).toBe(true);
     expect(result.accepted).toBe(0);
+  });
+});
+
+describe("runCycle · Phase B VirtualBooks", () => {
+  let risk: RiskEngine;
+  let journal: DecisionJournal;
+  let books: VirtualBooks;
+
+  beforeEach(() => {
+    risk = new RiskEngine(defaultSmallCapitalConfig());
+    journal = new DecisionJournal();
+    books = new VirtualBooks();
+  });
+
+  it("posts accept to VirtualBooks (debit output, credit input)", async () => {
+    books.seed(BASE_WETH, 10_000_000n); // inventory to pay output
+    const body = { orders: [makeDutch("0xbooks", "60000000", "1000000")] };
+    const result = await runCycle(
+      { risk, journal, virtualBooks: books },
+      {
+        fetchFn: mockFetch(body),
+        nowSec: 100,
+        referenceCostFn: async () => 1_100_000n,
+      }
+    );
+
+    expect(result.accepted).toBe(1);
+    const acc = journal.byKind("quote_accepted");
+    expect(acc[0].context?.virtualBooks).toBe("posted");
+
+    // Filler paid 1e6 WETH, received 60e6 USDC
+    expect(books.balance(BASE_WETH)).toBe(9_000_000n);
+    expect(books.balance(BASE_USDC)).toBe(60_000_000n);
+    expect(result.booksSnapshot?.some((r) => r.root === BASE_WETH.toLowerCase())).toBe(
+      true
+    );
+  });
+
+  it("still journals accept when books cannot cover (research note)", async () => {
+    // no seed → InsufficientBalance → policy reason exceeds_current_equity
+    const body = { orders: [makeDutch("0xshort", "60000000", "1000000")] };
+    const result = await runCycle(
+      { risk, journal, virtualBooks: books },
+      {
+        fetchFn: mockFetch(body),
+        nowSec: 100,
+        referenceCostFn: async () => 1_100_000n,
+      }
+    );
+
+    expect(result.accepted).toBe(1);
+    const acc = journal.byKind("quote_accepted");
+    expect(acc[0].context?.virtualBooks).toBe("exceeds_current_equity");
+    expect(books.balance(BASE_WETH)).toBe(0n);
   });
 });
