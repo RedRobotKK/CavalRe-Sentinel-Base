@@ -11,8 +11,9 @@ Selective Dutch · Amount-safe math · Fail-closed risk · Journal-first desk ·
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Chain](https://img.shields.io/badge/chain-Base%208453-0052FF)](https://base.org)
 [![Posture](https://img.shields.io/badge/live%20capital-OFF-red)](docs/GO_NO_GO.md)
+[![Phase A](https://img.shields.io/badge/Phase%20A-policy%20spec-goldenrod)](docs/PHASE_A.md)
 
-[Quick start](#quick-start) · [Math](#core-math) · [Architecture](#architecture) · [Desk](#sentinel-desk) · [Docs](#documentation) · [Scope](docs/SCOPE_REVIEW.md) · [Go/No-Go](docs/GO_NO_GO.md)
+[Quick start](#quick-start) · [Phases](#integration-phases-a--e) · [Math](#core-math) · [Architecture](#architecture) · [Desk](#sentinel-desk) · [Screenshots](#screenshots) · [Docs](#documentation)
 
 </div>
 
@@ -23,10 +24,10 @@ Selective Dutch · Amount-safe math · Fail-closed risk · Journal-first desk ·
 Most UniswapX filler demos optimize for **speed and volume**.  
 This stack optimizes for **survival of small capital**:
 
-- Every money value is an **Amount** (`bigint`) — FloatLib discipline off-chain  
+- Every money value is an **Amount** (`bigint`) — [FloatLib](https://github.com/CavalRe/cavalre-contracts/blob/main/math/FloatLib.sol) discipline off-chain  
 - **Edge is computed** against Uniswap v3 QuoterV2 — never assumed  
 - **Dutch decay is resolved before** risk and policy  
-- **Priority** on Base is classified and **ignored** until a written policy exists  
+- **Post-exclusive** Dutch can trade after `decayStartTime` (exclusivity proxy)  
 - The **journal is the book**; the desk only visualizes what was written  
 - **Live mode is hard-disabled** until [`docs/GO_NO_GO.md`](docs/GO_NO_GO.md) clears  
 
@@ -34,6 +35,31 @@ This stack optimizes for **survival of small capital**:
 > **Journal quality > volume.**  
 > **Accept rate ≠ win rate.**  
 > **NEVER TRUST, ALWAYS VERIFY.**
+
+---
+
+## Integration phases (A → E)
+
+Built on [cavalre-contracts](https://github.com/CavalRe/cavalre-contracts) as **source of truth** for Float + Ledger.
+
+```text
+A Policy spec ──► B Virtual books ──► C FloatLib port
+                         │
+                         ▼
+                  D Live capital ──► E Product
+```
+
+| Phase | Name | Status | Live capital | What ships |
+|-------|------|--------|--------------|------------|
+| **A** | Policy spec | **Done** | No | FloatLib constants, Ledger→policy map, phase ladder in code + [PHASE_A.md](docs/PHASE_A.md) |
+| **B** | Virtual books | Next | No | Journal accepts → ledger-shaped accounts (off-chain mirror) |
+| **C** | FloatLib port | Planned | No | TS Float ops verified against forge tests |
+| **D** | Live capital | Gated | **Yes*** | Dispatcher + Ledger on Base; filler module on accept |
+| **E** | Product | Planned | Yes* | Claim/internal PnL sleeves |
+
+\*Only after [GO_NO_GO.md](docs/GO_NO_GO.md). Runner throws `live_mode_not_enabled` until then.
+
+Encoded in `@cavalre/strategy` as `INTEGRATION_PHASES` — tests fail if the ladder drifts.
 
 ---
 
@@ -49,42 +75,54 @@ npm test && npm run typecheck && npm run audit:high
 ### Mainnet dry-run (no keys, no broadcast)
 
 ```bash
-export BASE_RPC_URL=https://mainnet.base.org   # prefer a dedicated RPC for long runs
+export BASE_RPC_URL=https://mainnet.base.org
 npm run dry-run
 ```
 
-Writes `journals/dry-run-base-mainnet-*.jsonl` (including cycle heartbeats when the book is empty).
-
-### Shadow markout (label accepts for W/L)
+### Sentinel Desk
 
 ```bash
+npm run desk:api    # :8787
+npm run desk:web    # :5173
+```
+
+### Research helpers
+
+```bash
+npm run flow-report
 npm run shadow-markout
-npm run shadow-markout -- --window 120
+npm run float-compare   # IEEE vs bigint research only — not FloatLib
 ```
 
-### Sentinel Desk (local quant UI)
+---
+
+## Screenshots
+
+Operator captures (commit under `docs/assets/` when available):
+
+| Asset | Capture |
+|-------|---------|
+| `docs/assets/desk-circuit.png` | Hero circuit / pipeline at http://127.0.0.1:5173 |
+| `docs/assets/desk-drops.png` | Drop-reasons ranked list |
+| `docs/assets/desk-intent-log.png` | Human-readable intent log |
+| `docs/assets/dry-run-terminal.png` | `npm run dry-run` heartbeats |
 
 ```bash
-npm run desk:api    # http://127.0.0.1:8787
-npm run desk:web    # http://127.0.0.1:5173 (or next free port)
+# with stack running:
+# open http://127.0.0.1:5173 → screenshot → save as above
+mkdir -p docs/assets
 ```
 
-| Surface | Doc |
-|---------|-----|
-| Operator dry-run | [`docs/MAINNET_DRY_RUN.md`](docs/MAINNET_DRY_RUN.md) |
-| Shadow markout | [`docs/SHADOW_MARKOUT.md`](docs/SHADOW_MARKOUT.md) |
-| Desk USP | [`docs/DESK.md`](docs/DESK.md) · [`docs/DESK_QUANT_VIEW.md`](docs/DESK_QUANT_VIEW.md) |
+Until assets are committed, the desk and terminal are the live “screenshots.”
 
 ---
 
 ## Core math
 
-All value-bearing quantities are **non-negative integers in native token units** (`Amount` = `bigint`).  
-No JavaScript `Number` for notionals, edges denominated in tokens, or markouts.
+All value-bearing quantities are **non-negative integers** (`Amount` = `bigint`).  
+No JavaScript `Number` for notionals.
 
-### Linear Dutch decay (UniswapX `DutchDecayLib` mirror)
-
-For a decay window $[t_s, t_e]$ and amounts $A_s \rightarrow A_e$:
+### Linear Dutch decay
 
 $$
 A(t) =
@@ -95,40 +133,15 @@ A_s + \dfrac{(A_e - A_s)\,(t - t_s)}{t_e - t_s} & t_s < t < t_e
 \end{cases}
 $$
 
-Implemented with **integer division only** on `bigint` (`packages/strategy` → `dutch-decay.ts`).
-
-Decay progress in basis points:
-
-$$
-\pi(t) = \mathrm{clamp}\!\left(\left\lfloor \frac{(t - t_s)\,10^{4}}{t_e - t_s} \right\rfloor,\, 0,\, 10^{4}\right)
-$$
-
 ### Edge (computed, never assumed)
-
-Given resolved output $O_{\mathrm{res}}$ (order obligation) and reference AMM output $O_{\mathrm{ref}}$ (QuoterV2) for the same input:
 
 $$
 e_{\mathrm{bps}} = \left\lfloor \frac{(O_{\mathrm{ref}} - O_{\mathrm{res}}) \cdot 10^{4}}{O_{\mathrm{ref}}} \right\rfloor
-\quad (O_{\mathrm{ref}} > 0)
 $$
 
-If $O_{\mathrm{ref}} = 0$ or missing ⇒ **edge undefined** ⇒ **reject** (fail-closed).
+$O_{\mathrm{ref}} = 0$ ⇒ **reject** (fail-closed).
 
-### Markout (shadow / post-decision)
-
-$$
-m_{\mathrm{bps}} = \left\lfloor \frac{(P_{\mathrm{mark}} - P_{\mathrm{fill}}) \cdot 10^{4}}{P_{\mathrm{fill}}} \right\rfloor
-$$
-
-- **Win:** $m_{\mathrm{bps}} \ge 0$  
-- **Loss:** $m_{\mathrm{bps}} < 0$  
-- **Toxic (default):** $m_{\mathrm{bps}} \le -30$
-
-Hit rate uses **labeled markouts only** — never accept count.
-
-$$
-h = \frac{\#\{m \ge 0\}}{\#\{m \text{ labeled}\}}
-$$
+FloatLib (21 significant digits) is the **root of trust** for future ratio ports — see [PHASE_A.md](docs/PHASE_A.md).
 
 ---
 
@@ -136,69 +149,22 @@ $$
 
 ```mermaid
 flowchart LR
-  API[UniswapX Orders API
-  Base Dutch_V3] --> POLL[poll + parse]
-  POLL --> CLS[classify]
-  CLS -->|priority / exclusive / unknown| REJ[reject + journal]
-  CLS -->|dutch| DEC[resolve decay]
-  DEC --> EDGE[compute edge
-  QuoterV2 eth_call]
-  EDGE -->|undefined| REJ
-  EDGE --> TOX[toxicity heuristic]
-  TOX --> RISK[RiskEngine]
-  RISK --> POL[FillPolicy
-  accept | reject | wait]
-  POL --> J[(DecisionJournal JSONL)]
-  J --> SHADOW[shadow-markout]
-  SHADOW --> J
+  API[UniswapX Orders API] --> POLL[poll + parse]
+  POLL --> CLS[classify + exclusivity proxy]
+  CLS -->|exclusive / priority / unknown| REJ[reject + journal]
+  CLS -->|dutch| AUC[evaluateDutchAuction]
+  AUC --> Q[QuoterV2 ref]
+  Q --> POL[accept / wait / reject]
+  POL --> J[(DecisionJournal)]
   J --> DESK[Sentinel Desk]
+  J --> SHADOW[shadow-markout]
 ```
 
-### Packages
+### Compliant cycle
 
-| Package | Responsibility |
-|---------|----------------|
-| [`@cavalre/core`](packages/core) | `Amount` primitive |
-| [`@cavalre/risk-engine`](packages/risk-engine) | Position / daily loss / drawdown gates |
-| [`@cavalre/journal`](packages/journal) | Append-only book + markout helpers |
-| [`@cavalre/strategy`](packages/strategy) | Classify, decay, edge, toxicity, policy |
-| [`@cavalre/uniswapx-base`](packages/uniswapx-base) | Poller, live wire parse, QuoterV2 |
-| [`@cavalre/wallet`](packages/wallet) | Non-custodial LocalSigner + ERC-20 (Node only) |
-| [`@cavalre/runner`](src/runner) | Compliant composition root |
-| [`@cavalre/desk`](apps/desk) | Quant research UI |
-
-### Compliant decision cycle
-
+```text
+classify(now) → quote ref → evaluateDutchAuction → journal
 ```
-classify → resolve decay → compute edge → toxicity → risk(resolved size) → policy → feature journal
-```
-
----
-
-## Sentinel Desk
-
-Local **read-only** research desk — not a Connect-Wallet dapp.
-
-- Execution **circuit** with particle flow on activity  
-- Funnel, timeline, edge histogram, class mix, reason bars  
-- **Limits** (RiskEngine) · **Book quality** (accept rate, markout W/L) · **Wallet readiness**  
-- Decision tape with full feature columns  
-
-Keys never enter the browser. Optional `SENTINEL_ADDRESS` is **public display only**.
-
----
-
-## Security & CI
-
-**Workflow:** [Production Security & Quality Gate](.github/workflows/ci.yml)
-
-| Stage | Gate |
-|-------|------|
-| 1 | TruffleHog verified secrets (full history) |
-| 2 | `npm audit --audit-level=high` |
-| 3 | Typecheck + full Vitest suite |
-
-Dependencies pinned via `package-lock.json` when present; toolchain overrides for `esbuild` / `vite` — see [`docs/SECURITY_DEPS.md`](docs/SECURITY_DEPS.md).
 
 ---
 
@@ -206,21 +172,11 @@ Dependencies pinned via `package-lock.json` when present; toolchain overrides fo
 
 | Source | Role |
 |--------|------|
-| [CavalRe/cavalre-contracts](https://github.com/CavalRe/cavalre-contracts) | FloatLib, Ledger, accounting — [TRUST doc](docs/TRUST_CAVALRE_CONTRACTS.md) |
-| [Uniswap/UniswapX](https://github.com/Uniswap/UniswapX) | Reactors, decay, Base deployments — [TRUST doc](docs/TRUST_UNISWAPX.md) |
-| [DefiLlama](https://defillama.com/) | Volume / TVL claims only (not inside decision path) |
-| [near/intents](https://github.com/near/intents) | Comparative intent patterns |
+| [CavalRe/cavalre-contracts](https://github.com/CavalRe/cavalre-contracts) | FloatLib, Ledger — [TRUST_CAVALRE_CONTRACTS](docs/TRUST_CAVALRE_CONTRACTS.md) · [TRUST](docs/TRUST.md) |
+| [Uniswap/UniswapX](https://github.com/Uniswap/UniswapX) | Reactors, decay — [TRUST_UNISWAPX](docs/TRUST_UNISWAPX.md) |
 | This repository | Implementation under test |
 
----
-
-## Live capital policy
-
-**Default: NO-GO.**
-
-Runner throws `live_mode_not_enabled` until every gate in [`docs/GO_NO_GO.md`](docs/GO_NO_GO.md) is satisfied with journal evidence (≥7 days dry-run, ≥100 shadow accepts, markout distribution, toxic fraction, worst-day bound).
-
-Phase-1 live (only after Go): **$200** max equity, direct reactor execute, daily review, halt on model divergence.
+**NEVER TRUST, ALWAYS VERIFY.**
 
 ---
 
@@ -228,33 +184,13 @@ Phase-1 live (only after Go): **$200** max equity, direct reactor execute, daily
 
 | Doc | Contents |
 |-----|----------|
-| [`docs/SCOPE_REVIEW.md`](docs/SCOPE_REVIEW.md) | Original scope → completion status |
-| [`docs/PRODUCTION.md`](docs/PRODUCTION.md) | Research-prod vs live-prod |
-| [`docs/COMPLIANCE_REVIEW.md`](docs/COMPLIANCE_REVIEW.md) | JS/Cumberland MUST matrix |
-| [`docs/GO_NO_GO.md`](docs/GO_NO_GO.md) | Live capital gates |
-| [`docs/STRATEGY_DUTCH_LOW_CAPITAL.md`](docs/STRATEGY_DUTCH_LOW_CAPITAL.md) | Game theory + low-capital policy |
-| [`docs/TRUST_UNISWAPX.md`](docs/TRUST_UNISWAPX.md) | UniswapX expert map |
-| [`docs/TRUST_CAVALRE_CONTRACTS.md`](docs/TRUST_CAVALRE_CONTRACTS.md) | Float / Ledger primitives |
-| [`docs/MAINNET_DRY_RUN.md`](docs/MAINNET_DRY_RUN.md) | Operator runbook |
-| [`docs/SHADOW_MARKOUT.md`](docs/SHADOW_MARKOUT.md) | Markout labeling |
-| [`docs/DESK.md`](docs/DESK.md) / [`DESK_QUANT_VIEW.md`](docs/DESK_QUANT_VIEW.md) | Desk design |
-| [`docs/WALLET.md`](docs/WALLET.md) | Non-custodial wallet lifecycle |
-| [`docs/PHASE_0.md`](docs/PHASE_0.md) | Phase 0 scope |
-| [`docs/README.md`](docs/README.md) | Doc index |
-
----
-
-## Roadmap
-
-| Phase | Status |
-|-------|--------|
-| **0** — Dry-run foundation, Amount, risk, journal, strategy, mainnet poll, desk, CI | **Complete** |
-| **0.5** — Sustained journals + shadow markouts + go/no-go evidence | **In progress** (ops) |
-| **1** — Tiny live after written Go | Blocked on gates |
-| **2** — Priority policy (separate), richer cost model | Not started |
-| **3** — Ledger inventory sleeves / SLM toxicity | Not started |
-
-Full checklist: [`docs/SCOPE_REVIEW.md`](docs/SCOPE_REVIEW.md).
+| [**PHASE_A.md**](docs/PHASE_A.md) | **Phase A policy spec (this milestone)** |
+| [TRUST_CAVALRE_CONTRACTS.md](docs/TRUST_CAVALRE_CONTRACTS.md) | Float / Ledger primitives |
+| [GO_NO_GO.md](docs/GO_NO_GO.md) | Live capital gates |
+| [STRATEGY_DUTCH_LOW_CAPITAL.md](docs/STRATEGY_DUTCH_LOW_CAPITAL.md) | Low-capital Dutch policy |
+| [DESK.md](docs/DESK.md) | Desk design |
+| [MAINNET_DRY_RUN.md](docs/MAINNET_DRY_RUN.md) | Operator runbook |
+| [docs/README.md](docs/README.md) | Full index |
 
 ---
 
@@ -262,8 +198,6 @@ Full checklist: [`docs/SCOPE_REVIEW.md`](docs/SCOPE_REVIEW.md).
 
 - [cavalre-contracts](https://github.com/CavalRe/cavalre-contracts) — FloatLib + accounting source of truth  
 - [UniswapX](https://github.com/Uniswap/UniswapX) — settlement protocol  
-- [UniswapX filler docs](https://developers.uniswap.org/docs/liquidity/uniswapx/filling/overview) — order types by chain  
-- [CavalRe-Sentinel](https://github.com/RedRobotKK/CavalRe-Sentinel) — prior research lineage  
 
 ---
 

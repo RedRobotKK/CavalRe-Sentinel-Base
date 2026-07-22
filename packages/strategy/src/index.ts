@@ -46,3 +46,20 @@ export {
   compareDecayAndEdge,
   type MathCompareRow,
 } from "./float-compare.js";
+export {
+  FLOATLIB_SIGNIFICANT_DIGITS,
+  FLOATLIB_MANTISSA_BITS,
+  FLOATLIB_NORMALIZED_MANTISSA_MIN,
+  FLOATLIB_NORMALIZED_MANTISSA_MAX,
+  PHASE_A_EXTERNAL_ROOTS,
+  LEDGER_ERROR_TO_POLICY_REASON,
+  mapLedgerErrorToPolicyReason,
+  PHASE_A_MONEY_RULES,
+  INTEGRATION_PHASES,
+  phaseById,
+  assertPhaseAInvariants,
+  type LedgerTokenKind,
+  type LedgerErrorName,
+  type IntegrationPhase,
+  type PhaseDefinition,
+} from "./phase-a-spec.js";
