@@ -1,0 +1,77 @@
+/* Live drop-reason histogram in pipeline hero */
+.drop-hist {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 80, 40, 0.28);
+  background: linear-gradient(180deg, rgba(40, 12, 6, 0.45), rgba(10, 5, 2, 0.7));
+  position: relative;
+  z-index: 1;
+}
+.drop-hist-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.drop-hist-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.drop-hist-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 72px;
+  gap: 10px;
+  align-items: center;
+}
+.drop-hist-label {
+  font-size: 11px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drop-hist-track {
+  height: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(92, 51, 16, 0.4);
+  overflow: hidden;
+}
+.drop-hist-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #a03018, #ff5533);
+  box-shadow: 0 0 10px rgba(255, 80, 40, 0.35);
+  transition: width 0.35s ease-out;
+}
+.drop-hist-bar.exclusive {
+  background: linear-gradient(90deg, #8a2810, #ff6a3a);
+}
+.drop-hist-bar.edge_negative,
+.drop-hist-bar.edge_thin {
+  background: linear-gradient(90deg, #7a4a10, #ffaa33);
+}
+.drop-hist-bar.edge_undefined,
+.drop-hist-bar.parse_amount {
+  background: linear-gradient(90deg, #4a3010, #c47a22);
+}
+.drop-hist-n {
+  font-size: 11px;
+  color: var(--bad);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.drop-hist-n em {
+  font-style: normal;
+  color: var(--muted);
+  margin-left: 6px;
+  font-size: 10px;
+}
+@media (max-width: 720px) {
+  .drop-hist-row {
+    grid-template-columns: 100px 1fr 56px;
+  }
+}
