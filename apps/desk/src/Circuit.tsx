@@ -49,6 +49,13 @@ type Signal = {
   stageLabel: string;
 };
 
+type HistRow = {
+  key: string;
+  label: string;
+  n: number;
+  pct: number;
+};
+
 /** Map machine reasons → short plain English */
 function humanReason(reason: string, orderClass: string): string {
   const r = reason.trim();
@@ -77,9 +84,38 @@ function humanReason(reason: string, orderClass: string): string {
   if (r.includes("decay") || r.includes("IncorrectAmounts"))
     return "Decay / amount error";
   if (r.startsWith("risk")) return r.replace(/_/g, " ");
-  // fallback: snake → words
   return r.replace(/_/g, " ").slice(0, 48);
 }
+
+/** Bucket machine reasons for histogram (stable keys). */
+function reasonBucket(reason: string): string {
+  const r = reason.trim();
+  if (r.startsWith("class_not_tradable:exclusive")) return "exclusive";
+  if (r.startsWith("class_not_tradable:priority")) return "priority";
+  if (r.startsWith("class_not_tradable")) return "class_other";
+  if (r === "edge_negative" || r === "edge_negative_wait_decay") return "edge_negative";
+  if (r === "edge_below_min" || r === "early_decay_thin_edge") return "edge_thin";
+  if (r.startsWith("edge_undefined")) return "edge_undefined";
+  if (r.includes("invalid_amount") || r.startsWith("input.") || r.startsWith("output."))
+    return "parse_amount";
+  if (r.includes("toxicity")) return "toxicity";
+  if (r.startsWith("exceeds_") || r.startsWith("risk") || r === "below_min_notional")
+    return "risk";
+  return r.slice(0, 32) || "other";
+}
+
+const BUCKET_LABEL: Record<string, string> = {
+  exclusive: "Exclusive filler",
+  priority: "Priority order",
+  class_other: "Class skip",
+  edge_negative: "Edge negative",
+  edge_thin: "Edge too thin",
+  edge_undefined: "No AMM quote",
+  parse_amount: "Parse / amount",
+  toxicity: "Toxicity",
+  risk: "Risk / size",
+  other: "Other",
+};
 
 function formatEdge(raw: string | null | undefined): { value: string; label: string } {
   if (raw == null || raw === "" || raw === "—") {
@@ -138,6 +174,7 @@ function build(records: any[]) {
   let reject = 0;
   const signals: Signal[] = [];
   let lastHit: StageId = "poll";
+  const bucketCount = new Map<string, number>();
 
   for (const r of records) {
     if (r.reason === "cycle_heartbeat") {
@@ -174,6 +211,8 @@ function build(records: any[]) {
     if (action === "reject") {
       drop[st] += 1;
       for (let i = 0; i < idx; i++) pass[PATH[i]!] += 1;
+      const b = reasonBucket(String(r.reason ?? ""));
+      bucketCount.set(b, (bucketCount.get(b) ?? 0) + 1);
     } else {
       const end = action === "accept" ? PATH.length : PATH.indexOf("policy") + 1;
       for (let i = 0; i < end; i++) pass[PATH[i]!] += 1;
@@ -212,6 +251,17 @@ function build(records: any[]) {
     drop: drop[s.id],
   }));
 
+  const histTotal = Math.max(1, reject);
+  const hist: HistRow[] = [...bucketCount.entries()]
+    .map(([key, n]) => ({
+      key,
+      label: BUCKET_LABEL[key] ?? key,
+      n,
+      pct: Math.round((n / histTotal) * 1000) / 10,
+    }))
+    .sort((a, b) => b.n - a.n)
+    .slice(0, 8);
+
   return {
     heartbeats,
     lastRaw,
@@ -223,6 +273,7 @@ function build(records: any[]) {
     funnel,
     log,
     lastHit,
+    hist,
     live: records.length > 0,
   };
 }
@@ -311,6 +362,34 @@ export function Circuit({
           accept {m.accept} · wait {m.wait} · dropped {m.reject}
         </span>
       </div>
+
+      {m.hist.length > 0 && (
+        <div className="drop-hist" aria-label="Live drop reason histogram">
+          <div className="drop-hist-head">
+            <span>Drop reasons</span>
+            <span className="muted">n={m.reject} · live</span>
+          </div>
+          <div className="drop-hist-rows">
+            {m.hist.map((row) => (
+              <div className="drop-hist-row" key={row.key}>
+                <span className="drop-hist-label" title={row.key}>
+                  {row.label}
+                </span>
+                <div className="drop-hist-track">
+                  <div
+                    className={`drop-hist-bar ${row.key}`}
+                    style={{ width: `${Math.max(3, row.pct)}%` }}
+                  />
+                </div>
+                <span className="drop-hist-n">
+                  {row.n}
+                  <em>{row.pct}%</em>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="chain-stage chain-stage-3d">
         <PipelineScene
