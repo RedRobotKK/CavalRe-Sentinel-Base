@@ -27,10 +27,20 @@ function flag(name, fallback) {
 const CYCLES = Number(flag("cycles", "15"));
 const INTERVAL_SEC = Number(flag("interval", "2"));
 const JOURNAL_DIR = flag("dir", "journals");
-const EMPTY_EVERY = Number(flag("emptyEvery", "4")); // every Nth cycle: empty book
+const EMPTY_EVERY = Number(flag("emptyEvery", "4"));
 
 const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const WETH = "0x4200000000000000000000000000000000000006";
+
+// defaultSmallCapitalConfig maxPosition = 80_000000 ($80 @ 6dp).
+// Stay under that so risk allows the quote.
+const IN_USDC = "50000000"; // $50
+// ~0.02 ETH @ ~$2500 — edgeGood owes less than ref
+const OUT_GOOD_START = "20000000000000000"; // 0.020 ETH
+const OUT_GOOD_END = "18000000000000000"; // 0.018 ETH
+const OUT_BAD_START = "25000000000000000"; // 0.025 ETH
+const OUT_BAD_END = "23000000000000000";
+const REF_OUT = 22000000000000000n; // 0.022 ETH — good edge vs 0.020, bad vs 0.025
 
 const risk = new RiskEngine(defaultSmallCapitalConfig());
 const journal = new DecisionJournal();
@@ -39,19 +49,12 @@ function stamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
-const journalPath = join(
-  JOURNAL_DIR,
-  `sim-base-dutch-${stamp()}.jsonl`
-);
+const journalPath = join(JOURNAL_DIR, `sim-base-dutch-${stamp()}.jsonl`);
 
 function makeDutch({ hash, edgeGood }) {
   const now = Math.floor(Date.now() / 1000);
-  // input: fixed USDC in
-  const inputStart = "1000000000"; // 1000 USDC 6dp
-  const inputEnd = "1000000000";
-  // output WETH 18dp — if edgeGood, resolved out is low vs ref
-  const outStart = edgeGood ? "400000000000000000" : "500000000000000000"; // 0.4 / 0.5 ETH
-  const outEnd = edgeGood ? "350000000000000000" : "450000000000000000";
+  const outStart = edgeGood ? OUT_GOOD_START : OUT_BAD_START;
+  const outEnd = edgeGood ? OUT_GOOD_END : OUT_BAD_END;
 
   return {
     orderHash: hash,
@@ -59,15 +62,15 @@ function makeDutch({ hash, edgeGood }) {
     orderStatus: "open",
     type: "Dutch_V3",
     cosignerData: {
-      decayStartTime: now - 30,
-      decayEndTime: now + 600,
+      decayStartTime: now - 120, // ~20% into window → past early-decay gate
+      decayEndTime: now + 480,
       exclusiveFiller: "0x0000000000000000000000000000000000000000",
     },
     deadline: now + 900,
     input: {
       token: USDC,
-      startAmount: inputStart,
-      endAmount: inputEnd,
+      startAmount: IN_USDC,
+      endAmount: IN_USDC,
     },
     outputs: [
       {
@@ -77,7 +80,7 @@ function makeDutch({ hash, edgeGood }) {
         recipient: "0x0000000000000000000000000000000000000001",
       },
     ],
-    createdAt: now - 60,
+    createdAt: now - 180,
   };
 }
 
@@ -104,13 +107,12 @@ function scenarioOrders(cycle) {
     makePriority(`0xsimprio${n}`.padEnd(66, "0")),
     makeExclusive(`0xsimexcl${n}`.padEnd(66, "0")),
   ];
-  // sometimes only one tradable
   if (cycle % 3 === 1) return orders.slice(0, 1);
   return orders;
 }
 
 function mockFetch(cycle) {
-  return async (url) => {
+  return async () => {
     const orders = scenarioOrders(cycle);
     return {
       ok: true,
@@ -121,14 +123,9 @@ function mockFetch(cycle) {
   };
 }
 
-/** Favorable ref so edgeGood orders can accept; tight for edgeBad. */
-async function simReferenceCost(order, resolvedInput) {
-  // ~0.45 ETH out for 1000 USDC → good edge vs 0.4 start out
-  if (order.outputStart <= 400000000000000000n) {
-    return 450000000000000000n;
-  }
-  // bad edge: ref below obligation
-  return 420000000000000000n;
+/** Fixed ref so edgeGood accepts and edgeBad rejects/waits. */
+async function simReferenceCost() {
+  return REF_OUT;
 }
 
 async function flushNew(prev) {
