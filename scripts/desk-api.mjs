@@ -2,9 +2,6 @@
 /**
  * Local journal API for Sentinel Desk.
  * Binds 127.0.0.1 only. Read-only. No keys.
- *
- * Wallet meta is inlined (view/none postures) so plain `node` does not need
- * to resolve @cavalre/wallet TypeScript sources.
  */
 
 import { createServer } from "node:http";
@@ -24,33 +21,16 @@ function operatingMode() {
   const hasKey = Boolean(
     process.env.SENTINEL_PRIVATE_KEY || process.env.FILLER_PRIVATE_KEY
   );
-  const liveFlag =
-    process.env.SENTINEL_LIVE === "1" || process.env.SENTINEL_LIVE === "true";
-  if (hasKey && liveFlag) {
-    return {
-      mode: "view",
-      label: "VIEW",
-      liveCapital: false,
-      note: "credentials present but runner live path not enabled",
-    };
-  }
-  if (hasKey) {
-    return {
-      mode: "view",
-      label: "VIEW",
-      liveCapital: false,
-      note: "wallet env present; still VIEW until Go/No-Go + live path",
-    };
-  }
   return {
     mode: "view",
     label: "VIEW",
     liveCapital: false,
-    note: "real sources, no credentials, no broadcast",
+    note: hasKey
+      ? "wallet env present; still VIEW until Go/No-Go + live path"
+      : "real sources, no credentials, no broadcast",
   };
 }
 
-/** Mirrors @cavalre/wallet resolveWalletSession for desk display only. */
 function walletLifecycleMeta() {
   const raw = process.env.SENTINEL_ADDRESS ?? null;
   const hasKey = Boolean(
@@ -116,10 +96,7 @@ async function loadJsonl(filePath, { limit = 500 } = {}) {
   return { totalLines: lines.length, records };
 }
 
-/**
- * Prefer journals that exercised the full path (accepts) over exclusive-only
- * dry-run noise that keeps appending and winning on raw reject count.
- */
+/** Prefer journals that exercised accepts over exclusive-only dry-run noise. */
 function decisionScore(records) {
   let accepts = 0;
   let rejects = 0;
@@ -136,7 +113,6 @@ function decisionScore(records) {
       waits += 1;
     }
   }
-  // Accepts dominate; waits secondary; rejects only break ties among empty books
   return accepts * 100 + waits * 10 + Math.min(rejects, 5);
 }
 
@@ -153,7 +129,6 @@ async function pickBestJournal(files, { limit = 400 } = {}) {
     try {
       const { records } = await loadJsonl(f.path, { limit });
       let score = decisionScore(records);
-      // slight bias to sim-* when it actually has path activity
       if (f.name.startsWith("sim-") && score >= 100) score += 20;
       if (score > bestScore) {
         bestScore = score;
@@ -187,6 +162,20 @@ async function loadAllRecords() {
   return { records, days: [...days].sort(), files: files.length };
 }
 
+function resolveAction(r) {
+  if (r.kind === "quote_accepted") return "accept";
+  if (r.kind === "quote_rejected") return "reject";
+  if (r.kind === "info" && r.context?.policyAction === "wait") return "wait";
+  if (r.context?.policyAction === "accept") return "accept";
+  if (r.context?.policyAction === "reject") return "reject";
+  if (r.context?.policyAction === "wait") return "wait";
+  return null;
+}
+
+/**
+ * Count each decision once per (ref, action).
+ * Prevents double-count when both kind and policyAction are set.
+ */
 function summarize(records) {
   const byKind = {};
   const byAction = {};
@@ -199,28 +188,33 @@ function summarize(records) {
   let losses = 0;
   let markoutSum = 0;
   let markoutN = 0;
+  const seen = new Set();
 
   for (const r of records) {
     byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
-    const action =
-      r.context?.policyAction ??
-      (r.kind === "quote_accepted"
-        ? "accept"
-        : r.kind === "quote_rejected"
-          ? "reject"
-          : null);
+
+    const action = resolveAction(r);
     if (action) {
-      byAction[action] = (byAction[action] ?? 0) + 1;
-      if (action === "accept") accepts += 1;
-      else if (action === "wait") waits += 1;
-      else if (action === "reject") rejects += 1;
+      const key = `${r.ref ?? r.seq ?? ""}:${action}:${r.ts ?? ""}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        byAction[action] = (byAction[action] ?? 0) + 1;
+        if (action === "accept") accepts += 1;
+        else if (action === "wait") waits += 1;
+        else if (action === "reject") rejects += 1;
+      }
     }
+
     const oc = r.context?.orderClass ?? "?";
     byClass[oc] = (byClass[oc] ?? 0) + 1;
     const reason = r.reason ?? "?";
     byReason[reason] = (byReason[reason] ?? 0) + 1;
 
-    if (r.kind === "markout" || r.markoutBps != null || r.context?.markoutBps != null) {
+    if (
+      r.kind === "markout" ||
+      r.markoutBps != null ||
+      r.context?.markoutBps != null
+    ) {
       const bps = Number(r.markoutBps ?? r.context?.markoutBps);
       if (Number.isFinite(bps)) {
         markoutN += 1;
@@ -244,7 +238,8 @@ function summarize(records) {
     byClass,
     byReason,
     book: {
-      acceptRateBps: decided > 0 ? Math.round((accepts * 10000) / decided) : null,
+      acceptRateBps:
+        decided > 0 ? Math.round((accepts * 10000) / decided) : null,
       markoutSample: markoutN,
       wins,
       losses,
@@ -256,13 +251,13 @@ function summarize(records) {
 }
 
 function buildGoNoGo(all) {
-  const accepts = all.records.filter(
-    (r) => r.kind === "quote_accepted" || r.context?.policyAction === "accept"
-  );
+  const accepts = all.records.filter((r) => resolveAction(r) === "accept");
   const uniqueRefs = new Set(accepts.map((r) => r.ref).filter(Boolean));
   const markouts = [];
   for (const r of all.records) {
-    const bps = Number(r.markoutBps ?? r.markout?.markoutBps ?? r.context?.markoutBps);
+    const bps = Number(
+      r.markoutBps ?? r.markout?.markoutBps ?? r.context?.markoutBps
+    );
     if (Number.isFinite(bps)) markouts.push(bps);
   }
   const mean =
@@ -292,7 +287,8 @@ function buildGoNoGo(all) {
       label: "Mean +2m markout ≥ 0",
       status:
         mean != null && mean >= 0 ? "pass" : mean != null ? "fail" : "pending",
-      detail: mean == null ? "n=0" : `mean=${mean.toFixed(1)} n=${markouts.length}`,
+      detail:
+        mean == null ? "n=0" : `mean=${mean.toFixed(1)} n=${markouts.length}`,
     },
     {
       id: "toxic",
@@ -475,7 +471,10 @@ async function handle(req, res) {
       return;
     }
 
-    if (url.pathname.startsWith("/journals/") && url.pathname.endsWith("/records")) {
+    if (
+      url.pathname.startsWith("/journals/") &&
+      url.pathname.endsWith("/records")
+    ) {
       const name = decodeURIComponent(url.pathname.split("/")[2] ?? "");
       const safe = basename(name);
       if (!safe.endsWith(".jsonl")) {
