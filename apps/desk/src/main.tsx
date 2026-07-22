@@ -5,6 +5,7 @@ import "./styles.css";
 import "./flow-rail.css";
 import "./styles-chain-patch.css";
 import "./styles-intent-log.css";
+import "./styles-drop-rank.css";
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
