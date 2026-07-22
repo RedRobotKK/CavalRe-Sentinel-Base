@@ -10,13 +10,24 @@ export interface WireOutput extends WireTokenAmount {
   recipient: string;
 }
 
-/** Cosigner envelope on V2/V3 Dutch orders from the live API. */
+/**
+ * Cosigner envelope on V2/V3 Dutch orders from the live API.
+ * V3 (Base): decayStartBlock + nonlinear curve; V2: decayStartTime/EndTime.
+ */
 export interface WireCosignerData {
   decayStartTime?: number;
   decayEndTime?: number;
+  /** V3: exclusivity ends / decay begins at this block. */
+  decayStartBlock?: number;
   exclusiveFiller?: string;
+  /** Soft exclusivity: non-exclusive fillers must deliver more output (bps). */
+  exclusivityOverrideBps?: number;
   inputOverride?: string;
   outputOverrides?: string[];
+  /** Piecewise curve block offsets (API array form). */
+  relativeBlocks?: number[] | string[];
+  /** Amount reductions from startAmount at each relativeBlocks point. */
+  relativeAmounts?: Array<string | number | bigint>;
 }
 
 /**
@@ -32,10 +43,14 @@ export interface WireOrder {
   orderType?: string;
   decayStartTime?: number;
   decayEndTime?: number;
+  decayStartBlock?: number;
   deadline?: number;
   input?: WireTokenAmount;
   outputs?: WireOutput[];
   exclusiveFiller?: string;
+  exclusivityOverrideBps?: number;
+  relativeBlocks?: number[] | string[];
+  relativeAmounts?: Array<string | number | bigint>;
   createdAt?: number;
   cosignerData?: WireCosignerData;
   nonce?: string;
@@ -49,8 +64,16 @@ export interface ParsedOrder {
   chainId: number;
   orderStatus: string;
   orderType: string;
+  /** V2 time window (unix seconds). */
   decayStartTime: number | null;
   decayEndTime: number | null;
+  /** V3 block clock — exclusivity ends / decay starts. */
+  decayStartBlock: number | null;
+  /** V3 piecewise curve offsets from decayStartBlock. */
+  relativeBlocks: number[];
+  /** V3 reductions from startAmount (bigint). */
+  relativeAmounts: bigint[];
+  exclusivityOverrideBps: number;
   deadline: number | null;
   inputToken: string;
   inputStart: Amount;
