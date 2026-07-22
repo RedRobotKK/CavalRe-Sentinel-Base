@@ -17,7 +17,6 @@ function readAmount(field: string, value: unknown): Amount {
     throw new Error(`missing_${field}`);
   }
   if (typeof value === "object") {
-    // rare: { amount: "..." }
     const o = value as Record<string, unknown>;
     const inner = pickWireAmount(o, ["amount", "startAmount", "endAmount", "value"]);
     if (inner !== undefined) return readAmount(field, inner);
@@ -36,6 +35,58 @@ function readAmount(field: string, value: unknown): Amount {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(`${field}:${msg}`);
   }
+}
+
+function readOptionalNumber(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) {
+    return Number(v);
+  }
+  return null;
+}
+
+/** Parse relativeBlocks array; fail closed on non-numeric entries. */
+function readRelativeBlocks(raw: unknown): number[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error("relativeBlocks:not_array");
+  }
+  const out: number[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const n = readOptionalNumber(raw[i]);
+    if (n === null || n < 0 || !Number.isInteger(n)) {
+      throw new Error(`relativeBlocks[${i}]:invalid`);
+    }
+    out.push(n);
+  }
+  return out;
+}
+
+/** Parse relativeAmounts as bigint reductions. */
+function readRelativeAmounts(raw: unknown): bigint[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error("relativeAmounts:not_array");
+  }
+  const out: bigint[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    try {
+      // allow negative int256 reductions from chain; store as bigint
+      const v = raw[i];
+      if (typeof v === "bigint") {
+        out.push(v);
+      } else if (typeof v === "number" && Number.isFinite(v)) {
+        out.push(BigInt(Math.trunc(v)));
+      } else if (typeof v === "string") {
+        out.push(BigInt(v));
+      } else {
+        throw new Error("bad_type");
+      }
+    } catch {
+      throw new Error(`relativeAmounts[${i}]:invalid`);
+    }
+  }
+  return out;
 }
 
 export function parseOrder(raw: unknown, options?: { chainId?: number }): ParseResult {
@@ -118,19 +169,10 @@ export function parseOrder(raw: unknown, options?: { chainId?: number }): ParseR
     outputStart = readAmount("output.startAmount", outStart);
     outputEnd = readAmount("output.endAmount", outEnd ?? outStart);
   } catch (e) {
-    const sample = {
-      inType: input ? typeof (input as any).startAmount : "no_input",
-      inVal: input ? String((input as any).startAmount ?? "").slice(0, 40) : "",
-      outType: typeof (out0 as any).startAmount,
-      outVal: String((out0 as any).startAmount ?? "").slice(0, 40),
-      keys: input ? Object.keys(input).join(",") : "",
-    };
     return {
       ok: false,
       reason: e instanceof Error ? e.message : "invalid_amount",
       orderHash: w.orderHash,
-      // attach via reason suffix for journal visibility
-      // (ParseResult type stays stable)
     };
   }
 
@@ -158,18 +200,16 @@ export function parseOrder(raw: unknown, options?: { chainId?: number }): ParseR
         : "unknown";
 
   const cos = w.cosignerData as Record<string, unknown> | undefined;
+
   const decayStartTime =
-    typeof w.decayStartTime === "number"
-      ? w.decayStartTime
-      : typeof cos?.decayStartTime === "number"
-        ? (cos.decayStartTime as number)
-        : null;
+    readOptionalNumber(w.decayStartTime) ??
+    readOptionalNumber(cos?.decayStartTime);
   const decayEndTime =
-    typeof w.decayEndTime === "number"
-      ? w.decayEndTime
-      : typeof cos?.decayEndTime === "number"
-        ? (cos.decayEndTime as number)
-        : null;
+    readOptionalNumber(w.decayEndTime) ??
+    readOptionalNumber(cos?.decayEndTime);
+  const decayStartBlock =
+    readOptionalNumber(w.decayStartBlock) ??
+    readOptionalNumber(cos?.decayStartBlock);
 
   const exclusiveFiller =
     typeof w.exclusiveFiller === "string"
@@ -178,6 +218,44 @@ export function parseOrder(raw: unknown, options?: { chainId?: number }): ParseR
         ? (cos.exclusiveFiller as string)
         : null;
 
+  const exclusivityOverrideBps =
+    readOptionalNumber(w.exclusivityOverrideBps) ??
+    readOptionalNumber(cos?.exclusivityOverrideBps) ??
+    0;
+
+  let relativeBlocks: number[] = [];
+  let relativeAmounts: bigint[] = [];
+  try {
+    relativeBlocks = readRelativeBlocks(
+      w.relativeBlocks ?? cos?.relativeBlocks
+    );
+    relativeAmounts = readRelativeAmounts(
+      w.relativeAmounts ?? cos?.relativeAmounts
+    );
+  } catch (e) {
+    return {
+      ok: false,
+      reason: e instanceof Error ? e.message : "invalid_curve",
+      orderHash: w.orderHash,
+    };
+  }
+
+  if (relativeBlocks.length !== relativeAmounts.length) {
+    return {
+      ok: false,
+      reason: "curve_length_mismatch",
+      orderHash: w.orderHash,
+    };
+  }
+
+  if (relativeBlocks.length > 16) {
+    return {
+      ok: false,
+      reason: "InvalidDecayCurve",
+      orderHash: w.orderHash,
+    };
+  }
+
   const order: ParsedOrder = {
     orderHash: w.orderHash,
     chainId: w.chainId,
@@ -185,7 +263,11 @@ export function parseOrder(raw: unknown, options?: { chainId?: number }): ParseR
     orderType,
     decayStartTime,
     decayEndTime,
-    deadline: typeof w.deadline === "number" ? w.deadline : null,
+    decayStartBlock,
+    relativeBlocks,
+    relativeAmounts,
+    exclusivityOverrideBps: Math.max(0, Math.floor(exclusivityOverrideBps)),
+    deadline: readOptionalNumber(w.deadline),
     inputToken: input.token as string,
     inputStart,
     inputEnd,
@@ -194,7 +276,7 @@ export function parseOrder(raw: unknown, options?: { chainId?: number }): ParseR
     outputEnd,
     outputRecipient: out0.recipient as string,
     exclusiveFiller,
-    createdAt: typeof w.createdAt === "number" ? w.createdAt : null,
+    createdAt: readOptionalNumber(w.createdAt),
     encodedOrder: typeof w.encodedOrder === "string" ? w.encodedOrder : null,
     signature: typeof w.signature === "string" ? w.signature : null,
   };

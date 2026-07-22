@@ -1,0 +1,83 @@
+/* Full-desk wire — very faint ambient only; hero has its own PipelineWire */
+
+.wire-term {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0.12;
+  font-family: "VT323", "IBM Plex Mono", ui-monospace, monospace;
+  filter: drop-shadow(0 0 8px rgba(255, 140, 30, 0.15));
+}
+
+.wire-term-bezel {
+  position: absolute;
+  left: 1%;
+  right: 1%;
+  top: 6%;
+  bottom: 2%;
+  border: 1px solid rgba(255, 140, 30, 0.08);
+  background: transparent;
+  box-shadow: none;
+}
+
+.wire-term-hdr {
+  display: none;
+}
+
+.wire-term-body {
+  height: 100%;
+  overflow: hidden;
+  padding: 48px 18px 24px;
+  font-size: 15px;
+  line-height: 1.35;
+  color: rgba(255, 170, 60, 0.35);
+  text-shadow: 0 0 4px rgba(255, 140, 30, 0.2);
+  white-space: pre;
+}
+
+.wire-term-line {
+  opacity: 0.4;
+  letter-spacing: 0.04em;
+}
+.wire-term-line.hot {
+  opacity: 0.7;
+  color: rgba(255, 200, 120, 0.55);
+}
+.wire-term-line.dim {
+  opacity: 0.2;
+}
+.wire-term-line.cursor {
+  opacity: 0.45;
+}
+
+.wire-term-scan {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.1) 0px,
+    rgba(0, 0, 0, 0.1) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.wire-term-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse 70% 60% at 50% 40%,
+    transparent 30%,
+    rgba(0, 0, 0, 0.55) 100%
+  );
+  pointer-events: none;
+}
+
+.layout {
+  position: relative;
+  z-index: 2;
+}

@@ -5,6 +5,7 @@ import {
   classifyOrder,
   isTradableClass,
   evaluateDutchAuction,
+  canResolveV3,
 } from "@cavalre/strategy";
 import type {
   RunnerConfig,
@@ -29,7 +30,14 @@ export async function runCycle(
     fetchFn: config.fetchFn,
     limit: config.pollLimit ?? 20,
     orderType: config.orderType ?? BASE_DEFAULT_ORDER_TYPE,
+    rpcUrl: config.rpcUrl,
+    rpcFetchFn: config.rpcFetchFn,
+    inclusionLag: config.inclusionLag ?? 0,
+    skipBlockNumber: config.skipBlockNumber,
   });
+
+  const currentBlock =
+    config.currentBlock !== undefined ? config.currentBlock : poll.currentBlock;
 
   for (const r of poll.rejections) {
     deps.journal.append({
@@ -61,11 +69,16 @@ export async function runCycle(
       halted: true,
       acceptedOrders: [],
       requestUrl: poll.requestUrl,
+      currentBlock,
     };
   }
 
   for (const order of poll.orders) {
-    const orderClass = classifyOrder(order, nowSec);
+    const orderClass = classifyOrder(
+      order,
+      nowSec,
+      currentBlock ?? undefined
+    );
 
     if (!isTradableClass(orderClass)) {
       rejected += 1;
@@ -79,12 +92,17 @@ export async function runCycle(
           orderClass,
           policyAction: "reject",
           nowSec,
+          currentBlock,
         }),
       });
       continue;
     }
 
-    if (order.decayStartTime === null || order.decayEndTime === null) {
+    const hasV3 = canResolveV3(order, currentBlock ?? undefined);
+    const hasV2 =
+      order.decayStartTime !== null && order.decayEndTime !== null;
+
+    if (!hasV3 && !hasV2) {
       rejected += 1;
       deps.journal.append({
         kind: "quote_rejected",
@@ -96,6 +114,7 @@ export async function runCycle(
           orderClass,
           policyAction: "reject",
           nowSec,
+          currentBlock,
         }),
       });
       continue;
@@ -136,6 +155,7 @@ export async function runCycle(
           orderClass,
           policyAction: "reject",
           nowSec,
+          currentBlock,
           refOutput: 0n,
         }),
       });
@@ -151,6 +171,10 @@ export async function runCycle(
       outputEnd: order.outputEnd,
       decayStartTime: order.decayStartTime,
       decayEndTime: order.decayEndTime,
+      decayStartBlock: order.decayStartBlock,
+      relativeBlocks: order.relativeBlocks,
+      relativeAmounts: order.relativeAmounts,
+      currentBlock: currentBlock ?? undefined,
       now: nowSec,
       refOutput,
       riskAllowed: riskDecision.allowed,
@@ -164,6 +188,7 @@ export async function runCycle(
       orderClass,
       policyAction: auction.decision.action,
       nowSec,
+      currentBlock,
       resolvedInput: auction.resolved.input,
       resolvedOutput: auction.resolved.output,
       refOutput,
@@ -171,6 +196,7 @@ export async function runCycle(
       toxicity: auction.toxicity,
       decayProgressBps: auction.decayProgressBps,
       auctionPhase: auction.phase,
+      resolvePath: auction.resolvePath,
     });
 
     if (auction.decision.action === "accept") {
@@ -191,7 +217,6 @@ export async function runCycle(
         } catch (e) {
           booksNote =
             e instanceof Error ? e.message.slice(0, 64) : "books_post_failed";
-          // Research path: still journal accept; books failure is informational
         }
       }
 
@@ -239,6 +264,7 @@ export async function runCycle(
     halted: deps.risk.isHalted(),
     acceptedOrders,
     requestUrl: poll.requestUrl,
+    currentBlock,
     booksSnapshot: deps.virtualBooks?.snapshot(),
   };
 }
@@ -249,6 +275,7 @@ function featureContext(p: {
   orderClass: string;
   policyAction: string;
   nowSec?: number;
+  currentBlock?: number | null;
   resolvedInput?: bigint;
   resolvedOutput?: bigint;
   refOutput?: bigint;
@@ -256,6 +283,7 @@ function featureContext(p: {
   toxicity?: number;
   decayProgressBps?: number;
   auctionPhase?: string;
+  resolvePath?: string;
 }): Record<string, string | boolean | null> {
   return {
     dryRun: true,
@@ -270,6 +298,13 @@ function featureContext(p: {
       p.order.decayStartTime !== null ? String(p.order.decayStartTime) : null,
     decayEndTime:
       p.order.decayEndTime !== null ? String(p.order.decayEndTime) : null,
+    decayStartBlock:
+      p.order.decayStartBlock !== null ? String(p.order.decayStartBlock) : null,
+    currentBlock:
+      p.currentBlock !== undefined && p.currentBlock !== null
+        ? String(p.currentBlock)
+        : null,
+    resolvePath: p.resolvePath ?? null,
     nowSec: p.nowSec !== undefined ? String(p.nowSec) : null,
     auctionPhase: p.auctionPhase ?? null,
     decayProgressBps:

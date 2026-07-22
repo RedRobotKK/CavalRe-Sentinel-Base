@@ -19,6 +19,13 @@ export {
   type FetchFn,
 } from "./poller.js";
 export {
+  fetchBaseBlockNumber,
+  normalizeInclusionLag,
+  BlockClockError,
+  MAX_INCLUSION_LAG,
+  type RpcFetchFn,
+} from "./block.js";
+export {
   createUniswapV3ReferenceCost,
   type ReferenceCostOptions,
 } from "./reference-cost.js";
@@ -26,6 +33,7 @@ export type {
   WireOrder,
   WireTokenAmount,
   WireOutput,
+  WireCosignerData,
   ParsedOrder,
   ParseResult,
 } from "./types.js";

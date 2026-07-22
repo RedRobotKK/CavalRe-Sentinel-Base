@@ -3,9 +3,9 @@
  * TRUST: UniswapX PriorityOrderReactor + Dutch reactors on Base.
  *
  * Policy v1.1: only non-exclusive Dutch-class orders are tradable.
- * Exclusive window proxy: exclusiveFiller is binding only until
- * decayStartTime (common Exclusive Dutch / cosigner pattern).
- * After that, treat as public dutch (post-exclusive).
+ * Exclusive window:
+ *   - Prefer block clock when decayStartBlock + currentBlock are present (V3)
+ *   - Else proxy exclusivityEnd ≈ decayStartTime (seconds)
  * Priority is ignored until a separate written policy exists.
  */
 
@@ -16,25 +16,37 @@ export interface ClassifiableOrder {
   exclusiveFiller: string | null;
   decayStartTime: number | null;
   decayEndTime: number | null;
+  /** V3 block when exclusivity ends / decay starts. */
+  decayStartBlock?: number | null;
 }
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 /**
  * True when a non-zero exclusive filler is still inside the exclusive window.
- * Proxy: exclusivityEnd ≈ decayStartTime (seconds, unix).
- * Fail-closed: missing decayStartTime ⇒ still exclusive.
+ * Block clock preferred; time clock fallback; missing timing ⇒ still exclusive.
  */
 export function isExclusiveWindowOpen(
-  order: Pick<ClassifiableOrder, "exclusiveFiller" | "decayStartTime">,
-  nowSec: number
+  order: Pick<
+    ClassifiableOrder,
+    "exclusiveFiller" | "decayStartTime" | "decayStartBlock"
+  >,
+  nowSec: number,
+  currentBlock?: number
 ): boolean {
   const excl = order.exclusiveFiller?.toLowerCase() ?? null;
   if (!excl || excl === ZERO_ADDRESS) return false;
 
+  if (
+    order.decayStartBlock != null &&
+    Number.isFinite(order.decayStartBlock) &&
+    currentBlock !== undefined
+  ) {
+    return currentBlock < order.decayStartBlock;
+  }
+
   const end = order.decayStartTime;
-  if (end === null || !Number.isFinite(end)) {
-    // No timing → cannot prove post-exclusive; keep exclusive
+  if (end === null || end === undefined || !Number.isFinite(end)) {
     return true;
   }
 
@@ -42,12 +54,12 @@ export function isExclusiveWindowOpen(
 }
 
 /**
- * Classify order. Pass nowSec (unix seconds) for exclusivity proxy;
- * defaults to Date.now()/1000 when omitted.
+ * Classify order. Pass nowSec (unix seconds) and optional currentBlock for V3.
  */
 export function classifyOrder(
   order: ClassifiableOrder,
-  nowSec?: number
+  nowSec?: number,
+  currentBlock?: number
 ): OrderClass {
   const t = order.orderType.toLowerCase();
   const now =
@@ -59,19 +71,18 @@ export function classifyOrder(
     return "priority";
   }
 
-  if (isExclusiveWindowOpen(order, now)) {
+  if (isExclusiveWindowOpen(order, now, currentBlock)) {
     return "exclusive";
   }
 
-  // Post-exclusive or never exclusive
   if (
     t.includes("dutch") ||
-    (order.decayStartTime !== null && order.decayEndTime !== null)
+    (order.decayStartTime !== null && order.decayEndTime !== null) ||
+    (order.decayStartBlock != null && Number.isFinite(order.decayStartBlock))
   ) {
     return "dutch";
   }
 
-  // Had exclusive filler but no dutch signals and window closed — still dutch-like
   const excl = order.exclusiveFiller?.toLowerCase() ?? null;
   if (excl && excl !== ZERO_ADDRESS) {
     return "dutch";

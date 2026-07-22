@@ -5,6 +5,8 @@
  *   - Receives input (swapper sells tokenIn)
  *   - Delivers output (resolved along Dutch curve)
  *   - edgeBps = (refOut - resolvedOut) / refOut * 10_000
+ *
+ * Supports V3 block curve via resolveOrderAmounts when currentBlock + curve set.
  */
 
 import type { Amount } from "@cavalre/core";
@@ -16,11 +18,11 @@ import {
   type FillPolicyConfig,
 } from "./fill-policy.js";
 import {
-  decayProgressBps,
-  decayInput,
-  decayOutput,
-  DutchDecayError,
-} from "./dutch-decay.js";
+  resolveOrderAmounts,
+  type ResolvableOrder,
+} from "./resolve.js";
+import { DutchDecayError } from "./dutch-decay.js";
+import { DutchBlockDecayError } from "./dutch-block-decay.js";
 
 export type DutchAuctionPhase = "pre_decay" | "decaying" | "finished";
 
@@ -34,14 +36,29 @@ export function dutchAuctionPhase(
   return "decaying";
 }
 
+export function dutchAuctionPhaseBlocks(
+  decayStartBlock: number,
+  lastRelativeBlock: number,
+  currentBlock: number
+): DutchAuctionPhase {
+  if (currentBlock < decayStartBlock) return "pre_decay";
+  if (currentBlock >= decayStartBlock + lastRelativeBlock) return "finished";
+  return "decaying";
+}
+
 export interface DutchAuctionInput {
   inputStart: Amount;
   inputEnd: Amount;
   outputStart: Amount;
   outputEnd: Amount;
-  decayStartTime: number;
-  decayEndTime: number;
+  decayStartTime: number | null;
+  decayEndTime: number | null;
   now: number;
+  /** V3 */
+  decayStartBlock?: number | null;
+  relativeBlocks?: number[];
+  relativeAmounts?: bigint[];
+  currentBlock?: number;
   /** Reference cost to source output (Quoter / inventory). */
   refOutput: Amount;
   riskAllowed: boolean;
@@ -59,45 +76,72 @@ export interface DutchAuctionResult {
   edge: EdgeResult;
   toxicity: number;
   decision: FillDecision;
+  resolvePath: "v3_block" | "v2_time" | "static";
 }
 
 /**
- * Evaluate a Dutch auction order at `now`.
+ * Evaluate a Dutch auction order at clock.
  * Fail-closed: decay errors and zero ref → reject.
  */
 export function evaluateDutchAuction(
   p: DutchAuctionInput
 ): DutchAuctionResult {
-  const phase = dutchAuctionPhase(p.decayStartTime, p.decayEndTime, p.now);
-  const progress = decayProgressBps(p.decayStartTime, p.decayEndTime, p.now);
+  const resolvable: ResolvableOrder = {
+    inputStart: p.inputStart,
+    inputEnd: p.inputEnd,
+    outputStart: p.outputStart,
+    outputEnd: p.outputEnd,
+    decayStartTime: p.decayStartTime,
+    decayEndTime: p.decayEndTime,
+    decayStartBlock: p.decayStartBlock ?? null,
+    relativeBlocks: p.relativeBlocks,
+    relativeAmounts: p.relativeAmounts,
+  };
 
   let resolvedInput: Amount;
   let resolvedOutput: Amount;
+  let progress: number;
+  let path: "v3_block" | "v2_time" | "static";
+  let phase: DutchAuctionPhase;
+
   try {
-    resolvedInput = decayInput(
-      p.inputStart,
-      p.inputEnd,
-      p.decayStartTime,
-      p.decayEndTime,
-      p.now
-    );
-    resolvedOutput = decayOutput(
-      p.outputStart,
-      p.outputEnd,
-      p.decayStartTime,
-      p.decayEndTime,
-      p.now
-    );
+    const r = resolveOrderAmounts(resolvable, {
+      nowSec: p.now,
+      currentBlock: p.currentBlock,
+    });
+    resolvedInput = r.input;
+    resolvedOutput = r.output;
+    progress = r.decayProgressBps;
+    path = r.path;
+
+    if (path === "v3_block" && p.decayStartBlock != null && p.currentBlock != null) {
+      const last =
+        p.relativeBlocks && p.relativeBlocks.length > 0
+          ? p.relativeBlocks[p.relativeBlocks.length - 1]!
+          : 0;
+      phase = dutchAuctionPhaseBlocks(
+        p.decayStartBlock,
+        last,
+        p.currentBlock
+      );
+    } else if (p.decayStartTime != null && p.decayEndTime != null) {
+      phase = dutchAuctionPhase(p.decayStartTime, p.decayEndTime, p.now);
+    } else {
+      phase = "pre_decay";
+    }
   } catch (e) {
     const reason =
-      e instanceof DutchDecayError ? e.message : "decay_error";
+      e instanceof DutchDecayError || e instanceof DutchBlockDecayError
+        ? e.message
+        : "decay_error";
     return {
-      phase,
-      decayProgressBps: progress,
+      phase: "pre_decay",
+      decayProgressBps: 0,
       resolved: { input: p.inputStart, output: p.outputStart },
       edge: { edgeBps: 0, undefined: true },
       toxicity: 1,
       decision: { action: "reject", reason },
+      resolvePath: "static",
     };
   }
 
@@ -114,6 +158,7 @@ export function evaluateDutchAuction(
       edge,
       toxicity: 1,
       decision: { action: "reject", reason: "edge_undefined" },
+      resolvePath: path,
     };
   }
 
@@ -140,5 +185,6 @@ export function evaluateDutchAuction(
     edge,
     toxicity,
     decision,
+    resolvePath: path,
   };
 }

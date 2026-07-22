@@ -47,7 +47,7 @@ Reactor.execute(SignedOrder)  or  executeWithCallback(...)
 | `DutchOrderReactor` | Linear-decay Dutch |
 | `ExclusiveDutchOrderReactor` | Dutch + exclusivity window before decay |
 | `V2DutchOrderReactor` | V2 Dutch |
-| `V3DutchOrderReactor` | V3 Dutch (block-based decay on many L2s) |
+| `V3DutchOrderReactor` | V3 Dutch (**block-based** decay on Base and other L2s) |
 | `PriorityOrderReactor` | Priority / RFQ-style (used on Base) |
 
 Interface: `IReactor`
@@ -68,12 +68,6 @@ function executeBatchWithCallback(SignedOrder[] calldata orders, bytes calldata 
    Reactor calls `IReactorCallback.reactorCallback(resolvedOrders, callbackData)` on the fill contract.  
    Fill contract must approve the reactor for each output token/amount before returning.
 
-Sample executors in-repo:
-- `SwapRouter02Executor`
-- `UniversalRouterExecutor`
-- `V4UniversalRouterExecutor`
-- `MultiFillerSwapRouter02Executor`
-
 ### Key structs (`ReactorStructs.sol`)
 
 - `OrderInfo` — reactor, swapper, nonce, deadline, optional validation callback
@@ -88,8 +82,6 @@ Canonical address (all chains we care about):
 
 `0x000000000022D473030F116dDEE9F6B43aC78BA3`
 
-Orders are pulled via `permitWitnessTransferFrom` with the order as witness. Fillers do **not** need prior ERC-20 `approve` from the swapper; Permit2 handles it.
-
 ---
 
 ## Base (chainId 8453) — Our Primary Target
@@ -100,10 +92,26 @@ From UniswapX README deployments:
 |----------|---------|
 | **Priority Order Reactor** | `0x000000001Ec5656dcdB24D90DFa42742738De729` |
 | **V3 Dutch Order Reactor** | `0x000000008a8330B5d1F43A62Bf4C673A49f27ba0` |
-| OrderQuoter | `0x88440407634f89873c5d9439987ac4be9725fea8` (Priority era) / `0x00000000a3db63Df9078cBF3dF88B4CAdD5a7F58` (V3) |
 | Permit2 | `0x000000000022D473030F116dDEE9F6B43aC78BA3` |
 
 Base has **both** Priority and DutchV3 reactors. Our dry-run poller must not assume a single order type.
+
+### Dutch V3 decay (mandatory)
+
+On Base, exclusivity and decay are measured in **block numbers**, not timestamps.
+
+- Cosigner: `decayStartBlock`, optional `exclusivityOverrideBps`
+- Curve: `relativeBlocks[]` + `relativeAmounts[]` (piecewise linear, max 16 points)
+- Sentinel implementation: `packages/strategy/src/dutch-block-decay.ts`
+- Operator doc: [DUTCH_V3_DECAY.md](./DUTCH_V3_DECAY.md)
+
+Resolve path:
+
+1. V3 curve + `currentBlock` → `decayAtBlock`
+2. Else V2 time window → `linearDecay`
+3. Else static start amounts / reject missing window in runner
+
+Soft exclusivity: non-exclusive fillers may fill during the exclusive window only by delivering more output (`exclusivityOverrideBps`).
 
 ---
 
@@ -111,7 +119,7 @@ Base has **both** Priority and DutchV3 reactors. Our dry-run poller must not ass
 
 1. **Permissionless** — anyone can fill; no KYC in the protocol itself.
 2. **Never invent settlement logic** — always go through the reactor.
-3. **Resolve decay correctly** — current executable amounts come from the reactor’s resolution (or OrderQuoter), not from raw `startAmount` alone at an arbitrary time.
+3. **Resolve decay correctly** — use V3 block curve on Base; never assume startAmount is the live obligation.
 4. **Output approvals** — on callback path, approve the reactor for exact output amounts before returning from `reactorCallback`.
 5. **Direct fill** is preferred for minimal capital / simple inventory strategies.
 6. **Fee-on-transfer** — recipient receives post-fee amount; size carefully.
@@ -123,8 +131,9 @@ Base has **both** Priority and DutchV3 reactors. Our dry-run poller must not ass
 
 | Sentinel component | UniswapX concept |
 |--------------------|------------------|
-| `uniswapx-base` poller + parser | Order service feed → `SignedOrder` / wire shape |
-| `ParsedOrder` amounts as `Amount` | Align with resolved `InputToken` / `OutputToken` uint256 |
+| `uniswapx-base` poller + parser | Order service feed + `eth_blockNumber` |
+| `ParsedOrder` V3 fields | `decayStartBlock`, curve, override bps |
+| `resolveOrderAmounts` | Reactor resolve (off-chain mirror) |
 | `RiskEngine` | Pre-filter before attempting `execute` |
 | `DecisionJournal` | Record accept/reject/fill/markout against `orderHash` |
 | `wallet` LocalSigner / external Signer | `msg.sender` for direct fill or owner of fill contract |
@@ -137,7 +146,7 @@ Live later: construct `SignedOrder`, call reactor `execute` (direct) with contro
 
 ## Libraries worth knowing by name
 
-- `DutchDecayLib` / `NonlinearDutchDecayLib` — price curves
+- `DutchDecayLib` / **`NonlinearDutchDecayLib`** — price curves (V2 time vs V3 block)
 - `ExclusivityLib` — exclusive filler windows
 - `PriorityFeeLib` / `PriorityOrderLib` — Base Priority path
 - `V2DutchOrderLib` / `V3DutchOrderLib`
@@ -151,6 +160,7 @@ Live later: construct `SignedOrder`, call reactor `execute` (direct) with contro
 - [ ] Read `README.md` + `IReactor` + `IReactorCallback` + `ReactorStructs`
 - [ ] Know Base reactor addresses (Priority + DutchV3)
 - [ ] Know Permit2 address
+- [ ] Understand **block-based** V3 decay vs time-based V2
 - [ ] Understand direct fill vs callback fill
 - [ ] Never put private keys in journals or logs
 - [ ] Treat order API data as untrusted until parsed and risk-checked

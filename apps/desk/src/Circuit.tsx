@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PipelineScene } from "./gl/PipelineScene";
+import { PipelineWire } from "./PipelineWire";
+import { PipelineHud, type HudStage } from "./PipelineHud";
 
 type StageId =
   | "poll"
@@ -49,7 +51,6 @@ type Signal = {
   stageLabel: string;
 };
 
-/** Map machine reasons → short plain English */
 function humanReason(reason: string, orderClass: string): string {
   const r = reason.trim();
   if (r.startsWith("class_not_tradable:exclusive"))
@@ -77,21 +78,20 @@ function humanReason(reason: string, orderClass: string): string {
   if (r.includes("decay") || r.includes("IncorrectAmounts"))
     return "Decay / amount error";
   if (r.startsWith("risk")) return r.replace(/_/g, " ");
-  // fallback: snake → words
   return r.replace(/_/g, " ").slice(0, 48);
 }
 
+/** Display only — values are already floor-bps integers from strategy. */
 function formatEdge(raw: string | null | undefined): { value: string; label: string } {
   if (raw == null || raw === "" || raw === "—") {
     return { value: "—", label: "—" };
   }
   const n = Number(raw);
   if (!Number.isFinite(n)) return { value: String(raw), label: String(raw) };
-  const sign = n > 0 ? "+" : "";
-  return {
-    value: String(raw),
-    label: `${sign}${n} bps`,
-  };
+  // integer bps — matches edgeBps floor path (no CSS float math)
+  const i = Math.trunc(n);
+  const sign = i > 0 ? "+" : "";
+  return { value: String(i), label: `${sign}${i} bps` };
 }
 
 function shortRef(ref: string): string {
@@ -118,6 +118,12 @@ function stageFrom(r: any): StageId {
   return "parse";
 }
 
+function percentile(sorted: number[], p: number): number | null {
+  if (sorted.length === 0) return null;
+  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * p));
+  return sorted[idx]!;
+}
+
 function build(records: any[]) {
   const drop: Record<StageId, number> = {
     poll: 0,
@@ -136,6 +142,17 @@ function build(records: any[]) {
   let accept = 0;
   let wait = 0;
   let reject = 0;
+  let exclusiveDrops = 0;
+  let priorityDrops = 0;
+  let edgeNeg = 0;
+  let edgeOk = 0;
+  let edgeSum = 0;
+  let edgeN = 0;
+  let v3Path = 0;
+  let v2Path = 0;
+  const latencies: number[] = [];
+  const rawSpark: number[] = [];
+  const edgeSpark: number[] = [];
   const signals: Signal[] = [];
   let lastHit: StageId = "poll";
 
@@ -144,8 +161,15 @@ function build(records: any[]) {
       heartbeats += 1;
       lastRaw = Number(r.context?.raw ?? lastRaw);
       pass.poll += 1;
+      const lat = Number(r.context?.latencyMs ?? NaN);
+      if (Number.isFinite(lat) && lat > 0) latencies.push(lat);
+      rawSpark.push(Math.max(0, Number(r.context?.raw ?? 0)));
       continue;
     }
+
+    const path = String(r.context?.resolvePath ?? "");
+    if (path === "v3_block") v3Path += 1;
+    if (path === "v2_time") v2Path += 1;
 
     if (
       r.kind !== "quote_accepted" &&
@@ -167,6 +191,20 @@ function build(records: any[]) {
     else if (action === "wait") wait += 1;
     else reject += 1;
 
+    const reasonRaw = String(r.reason ?? "");
+    if (reasonRaw.includes("exclusive")) exclusiveDrops += 1;
+    if (reasonRaw.includes("priority")) priorityDrops += 1;
+    if (reasonRaw === "edge_negative") edgeNeg += 1;
+    if (reasonRaw === "edge_ok") edgeOk += 1;
+
+    const eb = r.context?.edgeBps;
+    if (eb != null && eb !== "" && Number.isFinite(Number(eb))) {
+      const v = Math.trunc(Number(eb)); // floor-aligned integer bps
+      edgeSum += v;
+      edgeN += 1;
+      edgeSpark.push(Math.abs(v));
+    }
+
     const st = stageFrom(r);
     lastHit = st;
     const idx = PATH.indexOf(st);
@@ -182,7 +220,6 @@ function build(records: any[]) {
 
     const ref = String(r.ref ?? "");
     const orderClass = String(r.context?.orderClass ?? "—");
-    const reasonRaw = String(r.reason ?? "");
     const edge = formatEdge(
       r.context?.edgeBps != null && r.context.edgeBps !== ""
         ? String(r.context.edgeBps)
@@ -205,12 +242,126 @@ function build(records: any[]) {
   }
 
   const log = [...signals].reverse().slice(0, 40);
+  const meanEdge = edgeN > 0 ? Math.trunc(edgeSum / edgeN) : null;
+  const sortedLat = [...latencies].sort((a, b) => a - b);
+  const latency = {
+    p50: percentile(sortedLat, 0.5),
+    p95: percentile(sortedLat, 0.95),
+    last: latencies.length ? latencies[latencies.length - 1]! : null,
+    n: latencies.length,
+  };
 
   const funnel = STAGES.map((s) => ({
     label: s.label,
     pass: pass[s.id],
     drop: drop[s.id],
   }));
+
+  const hud: HudStage[] = [
+    {
+      id: "poll",
+      label: "POLL",
+      pass: pass.poll,
+      drop: drop.poll,
+      spark: rawSpark.slice(-16),
+      latency,
+      lines: [
+        `heartbeats ${heartbeats}`,
+        `last raw ${lastRaw}`,
+        latency.last != null ? `last poll ${Math.round(latency.last)}ms` : "last poll —",
+        `source UniswapX · Base`,
+      ],
+    },
+    {
+      id: "parse",
+      label: "PARSE",
+      pass: pass.parse,
+      drop: drop.parse,
+      lines: [
+        `orders decoded ${pass.parse}`,
+        `Amount = bigint`,
+        `curve fields extracted`,
+        `fail-closed on bad payload`,
+      ],
+    },
+    {
+      id: "classify",
+      label: "CLASS",
+      pass: pass.classify,
+      drop: drop.classify,
+      spark: [exclusiveDrops, priorityDrops, drop.classify].map((n) => n || 0.01),
+      lines: [
+        `exclusive drops ${exclusiveDrops}`,
+        `priority drops ${priorityDrops}`,
+        `tradable dutch only`,
+        `block clock for exclusivity`,
+      ],
+    },
+    {
+      id: "decay",
+      label: "DECAY",
+      pass: pass.decay,
+      drop: drop.decay,
+      lines: [
+        `v3_block path ${v3Path}`,
+        `v2_time fallback ${v2Path}`,
+        `decayAtBlock piecewise`,
+        `inclusion lag ≤ 5`,
+      ],
+    },
+    {
+      id: "edge",
+      label: "EDGE",
+      pass: pass.edge,
+      drop: drop.edge,
+      spark: edgeSpark.slice(-16),
+      lines: [
+        `edge_ok ${edgeOk}`,
+        `edge_negative ${edgeNeg}`,
+        meanEdge != null
+          ? `mean edge ${meanEdge > 0 ? "+" : ""}${meanEdge} bps`
+          : "mean edge —",
+        `floor bps · QuoterV2 ref`,
+      ],
+    },
+    {
+      id: "risk",
+      label: "RISK",
+      pass: pass.risk,
+      drop: drop.risk,
+      lines: [
+        `working capital gate`,
+        `max position %`,
+        `toxicity check`,
+        `fail-closed`,
+      ],
+    },
+    {
+      id: "policy",
+      label: "POLICY",
+      pass: pass.policy,
+      drop: drop.policy,
+      spark: [accept, wait, reject].map((n) => n || 0.01),
+      lines: [
+        `accept ${accept}`,
+        `wait ${wait}`,
+        `reject ${reject}`,
+        `dry-run · capital OFF`,
+      ],
+    },
+    {
+      id: "book",
+      label: "BOOK",
+      pass: pass.book,
+      drop: drop.book,
+      lines: [
+        `posted accepts ${accept}`,
+        `VirtualBooks debit/credit`,
+        `Source sleeve invariant`,
+        `markout pending`,
+      ],
+    },
+  ];
 
   return {
     heartbeats,
@@ -221,9 +372,11 @@ function build(records: any[]) {
     seen: accept + wait + reject,
     signalsThrough: accept + wait,
     funnel,
+    hud,
     log,
     lastHit,
     live: records.length > 0,
+    latency,
   };
 }
 
@@ -292,6 +445,11 @@ export function Circuit({
           <span>
             <em>hb</em> {m.heartbeats}
           </span>
+          {m.latency.last != null && (
+            <span className="ok">
+              <em>lat</em> {Math.round(m.latency.last)}ms
+            </span>
+          )}
           <span className="ok">
             <em>A</em> {m.accept}
           </span>
@@ -309,16 +467,19 @@ export function Circuit({
         <span className="pass-banner-n">{m.signalsThrough}</span>
         <span className="pass-banner-sub">
           accept {m.accept} · wait {m.wait} · dropped {m.reject}
+          {m.latency.p95 != null ? ` · p95 ${Math.round(m.latency.p95)}ms` : ""}
         </span>
       </div>
 
       <div className="chain-stage chain-stage-3d">
+        <PipelineWire records={records} />
         <PipelineScene
           pulseKey={pulseKey}
           activeStage={activeStage}
           intensity={Math.min(1, 0.4 + m.seen / 40)}
           stages={m.funnel}
         />
+        <PipelineHud stages={m.hud} />
       </div>
 
       <div className="pipe-outcomes">

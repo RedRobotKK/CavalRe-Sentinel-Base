@@ -3,6 +3,7 @@ import type { RiskEngine } from "@cavalre/risk-engine";
 import type { FetchFn, ParsedOrder } from "@cavalre/uniswapx-base";
 import type { Amount } from "@cavalre/core";
 import type { VirtualBooks } from "@cavalre/strategy";
+import type { RpcFetchFn } from "@cavalre/uniswapx-base";
 
 export type RunnerMode = "dry-run" | "live";
 
@@ -18,7 +19,13 @@ export interface RunnerConfig {
   /** Base default Dutch_V3 */
   orderType?: string;
   nowSec?: number;
+  /** Override block clock (tests / lag injection). */
+  currentBlock?: number;
   referenceCostFn?: ReferenceCostFn;
+  rpcUrl?: string;
+  rpcFetchFn?: RpcFetchFn;
+  inclusionLag?: number;
+  skipBlockNumber?: boolean;
 }
 
 export interface RunnerDeps {
@@ -38,5 +45,6 @@ export interface CycleResult {
   halted: boolean;
   acceptedOrders: ParsedOrder[];
   requestUrl?: string;
+  currentBlock?: number | null;
   booksSnapshot?: { root: string; sleeve: string; balance: string }[];
 }

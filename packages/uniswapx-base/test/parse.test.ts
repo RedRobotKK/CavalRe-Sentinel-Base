@@ -31,6 +31,8 @@ describe("parseOrder", () => {
     if (r.ok) {
       expect(r.order.inputStart).toBe(1000000n);
       expect(r.order.outputStart).toBe(500000000000000000n);
+      expect(r.order.relativeBlocks).toEqual([]);
+      expect(r.order.decayStartBlock).toBeNull();
     }
   });
 
@@ -54,6 +56,60 @@ describe("parseOrder", () => {
       expect(r.order.orderType).toBe("Dutch_V3");
       expect(r.order.decayStartTime).toBe(1_700_000_000);
     }
+  });
+
+  it("parses V3 cosigner decayStartBlock + curve", () => {
+    const wire = {
+      ...baseWire,
+      cosignerData: {
+        decayStartBlock: 12_345_678,
+        exclusiveFiller: "0x1111111111111111111111111111111111111111",
+        exclusivityOverrideBps: 25,
+        relativeBlocks: [4, 10],
+        relativeAmounts: ["40", "70"],
+      },
+    };
+    const r = parseOrder(wire);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.order.decayStartBlock).toBe(12_345_678);
+      expect(r.order.relativeBlocks).toEqual([4, 10]);
+      expect(r.order.relativeAmounts).toEqual([40n, 70n]);
+      expect(r.order.exclusivityOverrideBps).toBe(25);
+      expect(r.order.exclusiveFiller).toBe(
+        "0x1111111111111111111111111111111111111111"
+      );
+    }
+  });
+
+  it("FAIL: curve length mismatch", () => {
+    const r = parseOrder({
+      ...baseWire,
+      relativeBlocks: [4, 10],
+      relativeAmounts: ["40"],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("curve_length_mismatch");
+  });
+
+  it("FAIL: invalid relativeBlocks entry", () => {
+    const r = parseOrder({
+      ...baseWire,
+      relativeBlocks: [4, "nope"],
+      relativeAmounts: ["40", "50"],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/relativeBlocks/);
+  });
+
+  it("FAIL: curve longer than 16", () => {
+    const r = parseOrder({
+      ...baseWire,
+      relativeBlocks: Array.from({ length: 17 }, (_, i) => i + 1),
+      relativeAmounts: Array.from({ length: 17 }, () => "1"),
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe("InvalidDecayCurve");
   });
 
   it("parses JSON number amounts (live API)", () => {

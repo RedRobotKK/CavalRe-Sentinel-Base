@@ -135,12 +135,13 @@ export function PipelineScene({
       powerPreference: "high-performance",
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // fully transparent clear so phosphor wire behind the canvas is visible
     renderer.setClearColor(0x000000, 0);
     renderer.domElement.className = "pipeline-scene-canvas";
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x060301, 0.018);
+    // no FogExp2 — it painted an opaque veil over the CRT feed
 
     const camera = new THREE.PerspectiveCamera(36, 2, 0.1, 100);
     camera.position.set(0, 4.4, 13.5);
@@ -167,11 +168,11 @@ export function PipelineScene({
     if (Array.isArray(gm)) {
       gm.forEach((m) => {
         m.transparent = true;
-        m.opacity = 0.28;
+        m.opacity = 0.22;
       });
     } else {
       gm.transparent = true;
-      gm.opacity = 0.28;
+      gm.opacity = 0.22;
     }
     scene.add(grid);
 
@@ -258,7 +259,6 @@ export function PipelineScene({
       });
       materials.push(mat);
       const mesh = new THREE.Mesh(boxGeo, mat);
-      // fixed seat — no bounce
       mesh.position.set(x0 + i * spacing, 0.42, 0);
       mesh.rotation.x = -0.12;
       mesh.scale.setScalar(1);
@@ -457,7 +457,6 @@ export function PipelineScene({
         attr.needsUpdate = true;
       }
 
-      // color-only reaction — position/scale fixed
       for (let i = 0; i < N; i++) {
         const mat = materials[i]!;
         const isOn = i <= active;
