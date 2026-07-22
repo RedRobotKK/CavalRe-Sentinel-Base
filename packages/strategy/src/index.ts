@@ -33,3 +33,10 @@ export {
   type FlowRecord,
   type FlowSummary,
 } from "./flow-taxonomy.js";
+export {
+  dutchAuctionPhase,
+  evaluateDutchAuction,
+  type DutchAuctionPhase,
+  type DutchAuctionInput,
+  type DutchAuctionResult,
+} from "./dutch-auction.js";
