@@ -30,7 +30,6 @@ describe("dutchAuctionPhase", () => {
 
 describe("evaluateDutchAuction", () => {
   it("accepts when edge fat vs ref in mid decay", () => {
-    // resolved out ~ mid curve ≈ 0.019 ETH; ref higher → positive edge
     const r = evaluateDutchAuction({
       ...BASE,
       now: 1_500,
@@ -45,10 +44,12 @@ describe("evaluateDutchAuction", () => {
   });
 
   it("rejects negative edge late in curve", () => {
+    // Mildly underwater late: |edge| small so toxicity stays under maxToxicity
+    // and the edge_negative branch is the reject reason.
     const r = evaluateDutchAuction({
       ...BASE,
-      now: 1_900, // late
-      refOutput: 15_000000000000000n, // ref below obligation
+      now: 1_900,
+      refOutput: 18_100000000000000n,
       riskAllowed: true,
     });
     expect(r.edge.edgeBps).toBeLessThan(0);
@@ -59,7 +60,7 @@ describe("evaluateDutchAuction", () => {
   it("waits on negative edge early in curve", () => {
     const r = evaluateDutchAuction({
       ...BASE,
-      now: 1_100, // early (< 20% progress)
+      now: 1_100,
       refOutput: 15_000000000000000n,
       riskAllowed: true,
     });
