@@ -8,6 +8,7 @@ import "./styles-intent-log.css";
 import "./styles-drop-rank.css";
 import "./styles-latency-panel.css";
 import "./styles-stream-v2.css";
+import "./styles-wire-term.css";
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

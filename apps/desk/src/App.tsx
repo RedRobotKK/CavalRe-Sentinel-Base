@@ -3,6 +3,7 @@ import { getLatest, getMeta, getJournalFiles } from "./api";
 import { Circuit } from "./Circuit";
 import { ShaderBackdrop } from "./gl/ShaderBackdrop";
 import { StreamLayer } from "./StreamLayer";
+import { WireTerminal } from "./WireTerminal";
 
 type RecordRow = {
   seq?: number;
@@ -22,7 +23,6 @@ export function App() {
   const [clock, setClock] = useState(() => new Date().toISOString().slice(11, 19));
   const [prevCount, setPrevCount] = useState(0);
   const [pulseKey, setPulseKey] = useState(0);
-  /** Force a journal file; null = API pickBestJournal. */
   const [forcedFile, setForcedFile] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -71,6 +71,7 @@ export function App() {
   return (
     <div className="layout">
       <ShaderBackdrop activity={activity} />
+      <WireTerminal records={records} activeFile={activeFile} />
 
       <header className="topbar panel-rise">
         <div>
@@ -209,7 +210,11 @@ export function App() {
                     onClick={() => setForcedFile(f.name)}
                   >
                     {f.name.startsWith("sim-") ? "sim " : "live "}
-                    {f.name.replace(/^sim-base-dutch-/, "").replace(/^dry-run-base-mainnet-/, "").replace(/\.jsonl$/, "").slice(0, 18)}
+                    {f.name
+                      .replace(/^sim-base-dutch-/, "")
+                      .replace(/^dry-run-base-mainnet-/, "")
+                      .replace(/\.jsonl$/, "")
+                      .slice(0, 18)}
                     <div className="muted">{f.bytes} B</div>
                   </button>
                 </li>
