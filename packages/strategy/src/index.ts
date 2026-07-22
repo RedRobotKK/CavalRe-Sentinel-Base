@@ -7,6 +7,18 @@ export {
   DutchDecayError,
 } from "./dutch-decay.js";
 export {
+  decayAtBlock,
+  getBlockDecayedAmount,
+  getV3EndAmount,
+  linearDecayBlocks,
+  applyExclusivityOverride,
+  blockDecayProgressBps,
+  firstAffordableBlock,
+  DutchBlockDecayError,
+  type NonlinearDutchCurve,
+  type DutchBlockDecayConfig,
+} from "./dutch-block-decay.js";
+export {
   decideFill,
   heuristicToxicity,
   DEFAULT_LOW_CAPITAL_POLICY,
