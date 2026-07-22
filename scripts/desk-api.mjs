@@ -27,12 +27,11 @@ function operatingMode() {
   );
   const liveFlag =
     process.env.SENTINEL_LIVE === "1" || process.env.SENTINEL_LIVE === "true";
-  // Write is not actually enabled in code yet — report intent only
   if (hasKey && liveFlag) {
     return {
       mode: "write",
       label: "WRITE",
-      liveCapital: false, // still false until runner allows live
+      liveCapital: false,
       note: "credentials present but runner live path not enabled",
     };
   }
@@ -65,9 +64,10 @@ async function listJournalFiles() {
         path: p,
         bytes: s.size,
         mtime: s.mtime.toISOString(),
+        mtimeMs: s.mtimeMs,
       });
     }
-    files.sort((a, b) => (a.mtime < b.mtime ? 1 : -1));
+    files.sort((a, b) => b.mtimeMs - a.mtimeMs);
     return files;
   } catch {
     return [];
@@ -87,6 +87,46 @@ async function loadJsonl(filePath, { limit = 500 } = {}) {
     }
   }
   return { totalLines: lines.length, records };
+}
+
+/** Count decision rows (not heartbeats). */
+function decisionScore(records) {
+  let n = 0;
+  for (const r of records) {
+    if (r.kind === "quote_accepted" || r.kind === "quote_rejected") n += 2;
+    else if (r.kind === "info" && r.context?.policyAction) n += 1;
+    else if (r.reason === "cycle_heartbeat") n += 0;
+  }
+  return n;
+}
+
+/**
+ * Prefer a recent journal that actually has decisions.
+ * Falls back to newest mtime if everything is heartbeat-only.
+ */
+async function pickBestJournal(files, { limit = 400 } = {}) {
+  if (files.length === 0) return null;
+  const windowMs = 6 * 60 * 60 * 1000; // last 6h
+  const now = Date.now();
+  const recent = files.filter((f) => now - f.mtimeMs < windowMs);
+  const pool = recent.length > 0 ? recent : files.slice(0, 8);
+
+  let best = files[0];
+  let bestScore = -1;
+  for (const f of pool.slice(0, 12)) {
+    try {
+      const { records } = await loadJsonl(f.path, { limit });
+      const score = decisionScore(records);
+      // Prefer decisions; break ties by recency (pool already mtime-sorted)
+      if (score > bestScore) {
+        bestScore = score;
+        best = f;
+      }
+    } catch {
+      /* skip unreadable */
+    }
+  }
+  return best;
 }
 
 async function loadAllRecords() {
@@ -129,13 +169,17 @@ function summarize(records) {
       r.context?.policyAction ??
       (r.kind === "quote_accepted"
         ? "accept"
-        : r.kind === "info"
+        : r.kind === "info" && r.context?.policyAction === "wait"
           ? "wait"
-          : "reject");
-    byAction[action] = (byAction[action] ?? 0) + 1;
-    if (action === "accept") accepts += 1;
-    else if (action === "wait") waits += 1;
-    else rejects += 1;
+          : r.kind === "quote_rejected"
+            ? "reject"
+            : null);
+    if (action) {
+      byAction[action] = (byAction[action] ?? 0) + 1;
+      if (action === "accept") accepts += 1;
+      else if (action === "wait") waits += 1;
+      else if (action === "reject") rejects += 1;
+    }
     const oc = r.context?.orderClass ?? "?";
     byClass[oc] = (byClass[oc] ?? 0) + 1;
     const reason = r.reason ?? "?";
@@ -408,9 +452,18 @@ async function handle(req, res) {
         return;
       }
       const limit = Number(url.searchParams.get("limit") ?? 300);
-      const loaded = await loadJsonl(files[0].path, { limit });
+      const forced = url.searchParams.get("file");
+      let chosen = null;
+      if (forced) {
+        const safe = basename(forced);
+        chosen = files.find((f) => f.name === safe) ?? null;
+      }
+      if (!chosen) chosen = await pickBestJournal(files, { limit });
+      if (!chosen) chosen = files[0];
+
+      const loaded = await loadJsonl(chosen.path, { limit });
       json(res, {
-        file: files[0],
+        file: chosen,
         ...loaded,
         summary: summarize(loaded.records),
       });
