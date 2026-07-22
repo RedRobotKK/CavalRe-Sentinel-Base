@@ -60,6 +60,53 @@ function makeLabelTexture(s: StageVisual, active: boolean): THREE.CanvasTexture 
   return tex;
 }
 
+function makeTagTexture(
+  text: string,
+  color: string,
+  glow: string
+): THREE.CanvasTexture {
+  const w = 256;
+  const h = 96;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "rgba(12, 6, 2, 0.55)";
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 4;
+  roundRect(ctx, 8, 12, w - 16, h - 24, 12);
+  ctx.fill();
+  ctx.stroke();
+  ctx.shadowColor = glow;
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = color;
+  ctx.font = "bold 42px \"IBM Plex Mono\", ui-monospace, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, w / 2, h / 2 + 2);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
 function makeHexRainTexture(): THREE.CanvasTexture {
   const w = 64;
   const h = 256;
@@ -143,7 +190,6 @@ export function PipelineScene({
     }
     scene.add(grid);
 
-    // backdrop
     const bg = new THREE.Group();
     scene.add(bg);
 
@@ -247,7 +293,6 @@ export function PipelineScene({
       shards.push(mesh);
     }
 
-    // ——— stage pipeline ———
     const spacing = 2.5;
     const x0 = -((N - 1) * spacing) / 2;
 
@@ -275,51 +320,114 @@ export function PipelineScene({
       nodes.push(mesh);
     }
 
-    // Inter-block bridges: arc curves + segment tubes + traveling beads
+    // —— dual-path SYN / ACK conversation between stages ——
     type Bridge = {
-      curve: THREE.CatmullRomCurve3;
-      tube: THREE.Mesh;
-      tubeMat: THREE.MeshBasicMaterial;
-      bead: THREE.Mesh;
-      beadMat: THREE.MeshBasicMaterial;
+      fwd: THREE.CatmullRomCurve3;
+      rev: THREE.CatmullRomCurve3;
+      tubeFwd: THREE.Mesh;
+      tubeRev: THREE.Mesh;
+      tubeFwdMat: THREE.MeshBasicMaterial;
+      tubeRevMat: THREE.MeshBasicMaterial;
+      synBead: THREE.Mesh;
+      ackBead: THREE.Mesh;
+      synMat: THREE.MeshBasicMaterial;
+      ackMat: THREE.MeshBasicMaterial;
+      synTag: THREE.Sprite;
+      ackTag: THREE.Sprite;
       sparks: THREE.Points;
       sparkPos: Float32Array;
       sparkU: Float32Array;
+      /** 0 idle · 1 SYN flying · 2 ACK/NACK return */
+      phase: number;
+      phaseT: number;
     };
     const bridges: Bridge[] = [];
+
+    const synTex = makeTagTexture("SYN →", "#ffe0a0", "rgba(255,180,40,0.9)");
+    const ackTex = makeTagTexture("← ACK", "#a8ffc8", "rgba(80,255,160,0.7)");
+    const nackTex = makeTagTexture("← NACK", "#ff8866", "rgba(255,80,40,0.8)");
 
     for (let i = 0; i < N - 1; i++) {
       const xA = x0 + i * spacing + 0.95;
       const xB = x0 + (i + 1) * spacing - 0.95;
       const mid = (xA + xB) / 2;
-      const curve = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(xA, 0.35, 0),
-        new THREE.Vector3(mid, 0.75, 0.15),
-        new THREE.Vector3(xB, 0.35, 0),
+
+      // forward arc (SYN) slightly above
+      const fwd = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(xA, 0.55, 0.08),
+        new THREE.Vector3(mid, 1.05, 0.22),
+        new THREE.Vector3(xB, 0.55, 0.08),
+      ]);
+      // reverse arc (ACK) slightly below / opposite z
+      const rev = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(xB, 0.25, -0.08),
+        new THREE.Vector3(mid, 0.55, -0.2),
+        new THREE.Vector3(xA, 0.25, -0.08),
       ]);
 
-      const tubeGeo = new THREE.TubeGeometry(curve, 24, 0.035, 6, false);
-      const tubeMat = new THREE.MeshBasicMaterial({
-        color: 0xff9f1a,
+      const tubeFwdMat = new THREE.MeshBasicMaterial({
+        color: 0xffc266,
         transparent: true,
-        opacity: 0.2,
+        opacity: 0.22,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       });
-      const tube = new THREE.Mesh(tubeGeo, tubeMat);
-      scene.add(tube);
+      const tubeRevMat = new THREE.MeshBasicMaterial({
+        color: 0x66ffaa,
+        transparent: true,
+        opacity: 0.14,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const tubeFwd = new THREE.Mesh(
+        new THREE.TubeGeometry(fwd, 28, 0.028, 6, false),
+        tubeFwdMat
+      );
+      const tubeRev = new THREE.Mesh(
+        new THREE.TubeGeometry(rev, 28, 0.022, 6, false),
+        tubeRevMat
+      );
+      scene.add(tubeFwd, tubeRev);
 
-      const beadMat = new THREE.MeshBasicMaterial({
-        color: 0xffe0a0,
+      const synMat = new THREE.MeshBasicMaterial({
+        color: 0xffe8b0,
+        transparent: true,
+        opacity: 0.95,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const ackMat = new THREE.MeshBasicMaterial({
+        color: 0xa0ffc0,
         transparent: true,
         opacity: 0.9,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       });
-      const bead = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 12), beadMat);
-      scene.add(bead);
+      const synBead = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 14), synMat);
+      const ackBead = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 12), ackMat);
+      scene.add(synBead, ackBead);
 
-      const SPARK = 14;
+      const synTag = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: synTex,
+          transparent: true,
+          depthWrite: false,
+          opacity: 0,
+        })
+      );
+      synTag.scale.set(0.85, 0.32, 1);
+      const ackTag = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: ackTex,
+          transparent: true,
+          depthWrite: false,
+          opacity: 0,
+        })
+      );
+      ackTag.scale.set(0.85, 0.32, 1);
+      scene.add(synTag, ackTag);
+
+      const SPARK = 16;
       const sparkPos = new Float32Array(SPARK * 3);
       const sparkU = new Float32Array(SPARK);
       for (let s = 0; s < SPARK; s++) sparkU[s] = Math.random();
@@ -329,9 +437,9 @@ export function PipelineScene({
         sparkGeo,
         new THREE.PointsMaterial({
           color: 0xffc266,
-          size: 0.07,
+          size: 0.065,
           transparent: true,
-          opacity: 0.7,
+          opacity: 0.65,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
           sizeAttenuation: true,
@@ -339,10 +447,31 @@ export function PipelineScene({
       );
       scene.add(sparks);
 
-      bridges.push({ curve, tube, tubeMat, bead, beadMat, sparks, sparkPos, sparkU });
+      bridges.push({
+        fwd,
+        rev,
+        tubeFwd,
+        tubeRev,
+        tubeFwdMat,
+        tubeRevMat,
+        synBead,
+        ackBead,
+        synMat,
+        ackMat,
+        synTag,
+        ackTag,
+        sparks,
+        sparkPos,
+        sparkU,
+        phase: 0,
+        phaseT: Math.random(),
+      });
     }
 
-    // base bus under arcs
+    // sequential handshake cascade index (driven by pulse)
+    let handshakeFocus = 0;
+    let handshakeClock = 0;
+
     const busPts = [
       new THREE.Vector3(x0 - 1.1, 0.05, 0),
       ...Array.from(
@@ -403,9 +532,31 @@ export function PipelineScene({
         lastPulse = pulseRef.current;
         burst = 1;
         waveClock = 0;
+        handshakeFocus = 0;
+        handshakeClock = 0;
+        for (const b of bridges) {
+          b.phase = 0;
+          b.phaseT = 0;
+        }
       }
       burst *= 0.94;
       waveClock += 0.016;
+      handshakeClock += 0.016;
+
+      // cascade SYN→ACK along the active path
+      if (handshakeClock > 0.38) {
+        handshakeClock = 0;
+        const maxBridge = Math.max(0, active);
+        if (handshakeFocus <= maxBridge && handshakeFocus < bridges.length) {
+          const b = bridges[handshakeFocus]!;
+          b.phase = 1;
+          b.phaseT = 0;
+          handshakeFocus += 1;
+        } else if (handshakeFocus > maxBridge) {
+          // idle ambient chatter on all lit bridges
+          handshakeFocus = 0;
+        }
+      }
 
       const sig =
         active +
@@ -462,7 +613,6 @@ export function PipelineScene({
           0.04 + 0.03 * Math.sin(t + i);
       });
 
-      // stages
       for (let i = 0; i < N; i++) {
         const mesh = nodes[i]!;
         const mat = materials[i]!;
@@ -480,37 +630,86 @@ export function PipelineScene({
         mesh.scale.setScalar(isCur ? 1.04 + burst * 0.03 : 1);
       }
 
-      // inter-block animations
+      // SYN / ACK animation per bridge
       for (let i = 0; i < bridges.length; i++) {
         const b = bridges[i]!;
-        const lit = i < active; // bridge before active is hot
-        const crossing = i === active - 1 || (active === 0 && i === 0);
+        const lit = i < active;
+        const downstream = stagesRef.current[i + 1];
+        const nack = (downstream?.drop ?? 0) > (downstream?.pass ?? 0) * 0.5 && (downstream?.drop ?? 0) > 0;
 
-        b.tubeMat.opacity = lit
-          ? 0.45 + burst * 0.25
-          : 0.12 + Math.sin(t * 2 + i) * 0.04;
-        b.tubeMat.color.setHex(lit || crossing ? 0xffc266 : 0xa06020);
+        b.tubeFwdMat.opacity = lit ? 0.4 + burst * 0.2 : 0.1;
+        b.tubeRevMat.opacity = lit ? 0.28 + burst * 0.15 : 0.08;
+        b.tubeRevMat.color.setHex(nack && lit ? 0xff6644 : 0x66ffaa);
 
-        // bead travels on lit / near-active bridges
-        const speed = lit ? 0.55 : 0.2;
-        const u = (t * speed + i * 0.17) % 1;
-        const pt = b.curve.getPointAt(u);
-        b.bead.position.copy(pt);
-        b.bead.position.y += 0.02;
-        b.beadMat.opacity = lit ? 0.95 : 0.25;
-        b.bead.scale.setScalar(lit ? 1.2 + burst * 0.4 : 0.7);
+        // ambient crawl when lit but not in handshake phase
+        if (b.phase === 0 && lit) {
+          const u = (t * 0.35 + i * 0.12) % 1;
+          const pt = b.fwd.getPointAt(u);
+          b.synBead.position.copy(pt);
+          b.synMat.opacity = 0.35;
+          b.synBead.scale.setScalar(0.7);
+          (b.synTag.material as THREE.SpriteMaterial).opacity = 0;
 
-        // spark trail along arc
+          const ur = (t * 0.28 + i * 0.2) % 1;
+          const pr = b.rev.getPointAt(ur);
+          b.ackBead.position.copy(pr);
+          b.ackMat.opacity = 0.3;
+          b.ackBead.scale.setScalar(0.6);
+          (b.ackTag.material as THREE.SpriteMaterial).opacity = 0;
+          b.ackTag.material = new THREE.SpriteMaterial({
+            map: nack ? nackTex : ackTex,
+            transparent: true,
+            depthWrite: false,
+            opacity: 0,
+          });
+        }
+
+        // explicit handshake
+        if (b.phase === 1) {
+          b.phaseT += 0.028;
+          const u = Math.min(1, b.phaseT);
+          const pt = b.fwd.getPointAt(u);
+          b.synBead.position.copy(pt);
+          b.synBead.scale.setScalar(1.35);
+          b.synMat.opacity = 1;
+          b.synTag.position.set(pt.x, pt.y + 0.35, pt.z);
+          (b.synTag.material as THREE.SpriteMaterial).opacity = 0.95 * (1 - Math.abs(u - 0.5) * 0.4);
+          if (u >= 1) {
+            b.phase = 2;
+            b.phaseT = 0;
+            // flash destination node briefly via emissive
+            const dest = materials[i + 1];
+            if (dest) dest.emissiveIntensity = 0.85;
+          }
+        } else if (b.phase === 2) {
+          b.phaseT += 0.032;
+          const u = Math.min(1, b.phaseT);
+          const pt = b.rev.getPointAt(u);
+          b.ackBead.position.copy(pt);
+          b.ackBead.scale.setScalar(1.2);
+          b.ackMat.color.setHex(nack ? 0xff6644 : 0xa0ffc0);
+          b.ackMat.opacity = 1;
+          const tagMat = b.ackTag.material as THREE.SpriteMaterial;
+          tagMat.map = nack ? nackTex : ackTex;
+          tagMat.opacity = 0.95;
+          b.ackTag.position.set(pt.x, pt.y + 0.32, pt.z);
+          (b.synTag.material as THREE.SpriteMaterial).opacity = 0;
+          if (u >= 1) {
+            b.phase = 0;
+            b.phaseT = 0;
+            tagMat.opacity = 0;
+          }
+        }
+
         const attr = b.sparks.geometry.attributes.position as THREE.BufferAttribute;
         for (let s = 0; s < b.sparkU.length; s++) {
-          const su = (b.sparkU[s]! + t * (0.3 + s * 0.02)) % 1;
-          const sp = b.curve.getPointAt(su);
-          attr.setXYZ(s, sp.x, sp.y + Math.sin(t * 6 + s) * 0.03, sp.z);
+          const curve = s % 2 === 0 ? b.fwd : b.rev;
+          const su = (b.sparkU[s]! + t * (0.25 + s * 0.015)) % 1;
+          const sp = curve.getPointAt(su);
+          attr.setXYZ(s, sp.x, sp.y + Math.sin(t * 6 + s) * 0.02, sp.z);
         }
         attr.needsUpdate = true;
-        (b.sparks.material as THREE.PointsMaterial).opacity = lit
-          ? 0.75
-          : 0.2;
+        (b.sparks.material as THREE.PointsMaterial).opacity = lit ? 0.7 : 0.18;
       }
 
       busMat.opacity = 0.22 + (active / N) * 0.25 + burst * 0.1;
@@ -530,7 +729,10 @@ export function PipelineScene({
       nebGeo.dispose();
       shardGeo.dispose();
       rainTex.dispose();
-      textures.forEach((t) => t.dispose());
+      synTex.dispose();
+      ackTex.dispose();
+      nackTex.dispose();
+      textures.forEach((tx) => tx.dispose());
       materials.forEach((m) => m.dispose());
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) {
