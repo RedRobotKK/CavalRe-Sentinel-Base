@@ -116,13 +116,28 @@ async function loadJsonl(filePath, { limit = 500 } = {}) {
   return { totalLines: lines.length, records };
 }
 
+/**
+ * Prefer journals that exercised the full path (accepts) over exclusive-only
+ * dry-run noise that keeps appending and winning on raw reject count.
+ */
 function decisionScore(records) {
-  let n = 0;
+  let accepts = 0;
+  let rejects = 0;
+  let waits = 0;
   for (const r of records) {
-    if (r.kind === "quote_accepted" || r.kind === "quote_rejected") n += 2;
-    else if (r.kind === "info" && r.context?.policyAction) n += 1;
+    if (r.kind === "quote_accepted" || r.context?.policyAction === "accept") {
+      accepts += 1;
+    } else if (
+      r.kind === "quote_rejected" ||
+      r.context?.policyAction === "reject"
+    ) {
+      rejects += 1;
+    } else if (r.kind === "info" && r.context?.policyAction === "wait") {
+      waits += 1;
+    }
   }
-  return n;
+  // Accepts dominate; waits secondary; rejects only break ties among empty books
+  return accepts * 100 + waits * 10 + Math.min(rejects, 5);
 }
 
 async function pickBestJournal(files, { limit = 400 } = {}) {
@@ -137,7 +152,9 @@ async function pickBestJournal(files, { limit = 400 } = {}) {
   for (const f of pool.slice(0, 12)) {
     try {
       const { records } = await loadJsonl(f.path, { limit });
-      const score = decisionScore(records);
+      let score = decisionScore(records);
+      // slight bias to sim-* when it actually has path activity
+      if (f.name.startsWith("sim-") && score >= 100) score += 20;
       if (score > bestScore) {
         bestScore = score;
         best = f;
@@ -372,6 +389,7 @@ async function handle(req, res) {
           "GET /go-no-go",
           "GET /journals",
           "GET /journals/latest?limit=300",
+          "GET /journals/latest?file=<name.jsonl>",
         ],
       });
       return;
