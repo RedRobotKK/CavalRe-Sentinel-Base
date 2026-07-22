@@ -6,6 +6,7 @@ import "./flow-rail.css";
 import "./styles-chain-patch.css";
 import "./styles-intent-log.css";
 import "./styles-drop-rank.css";
+import "./styles-drop-hist.css";
 import "./styles-latency-panel.css";
 import "./styles-stream-v2.css";
 
