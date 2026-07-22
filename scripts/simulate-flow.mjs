@@ -2,6 +2,9 @@
 /**
  * Simulate UniswapX order flow through the REAL decision path.
  * Seeds VirtualBooks so quote_accepted posts inventory.
+ *
+ * V3 mode: cosigner carries decayStartBlock + piecewise curve.
+ * currentBlock is fixed so resolvePath = v3_block in journals.
  */
 
 import { mkdir, appendFile } from "node:fs/promises";
@@ -27,18 +30,22 @@ const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const WETH = "0x4200000000000000000000000000000000000006";
 
 const IN_USDC = "50000000";
-const OUT_GOOD_START = "20000000000000000";
-const OUT_GOOD_END = "18000000000000000";
-const OUT_BAD_START = "25000000000000000";
-const OUT_BAD_END = "23000000000000000";
-const REF_OUT = 22000000000000000n;
+/** Start outputs — good stays under REF, bad above. */
+const OUT_GOOD_START = "20000000000000000"; // 0.02 ETH
+const OUT_BAD_START = "25000000000000000"; // 0.025 ETH
+const REF_OUT = 22000000000000000n; // 0.022 ETH
+
+/** Simulated Base head — mid-curve for open Dutch. */
+const SIM_BLOCK = 1_000_010;
+const DECAY_START = 1_000_000;
+/** Exclusive window still open at SIM_BLOCK. */
+const EXCL_DECAY_START = 1_000_100;
 
 const risk = new RiskEngine(defaultSmallCapitalConfig());
 const journal = new DecisionJournal();
 const virtualBooks = new VirtualBooks();
-// Seed output inventory so postAccept can debit WETH on accept
-virtualBooks.seed(WETH, 100_000000000000000000n); // 100 ETH research inventory
-virtualBooks.seed(USDC, 1_000_000_000000n); // spare USDC sleeve
+virtualBooks.seed(WETH, 100_000000000000000000n);
+virtualBooks.seed(USDC, 1_000_000_000000n);
 
 function stamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
@@ -49,17 +56,24 @@ const journalPath = join(JOURNAL_DIR, `sim-base-dutch-${stamp()}.jsonl`);
 function makeDutch({ hash, edgeGood }) {
   const now = Math.floor(Date.now() / 1000);
   const outStart = edgeGood ? OUT_GOOD_START : OUT_BAD_START;
-  const outEnd = edgeGood ? OUT_GOOD_END : OUT_BAD_END;
+  // Curve: by relative block 20, drop 10% of start (floor path via relativeAmounts)
+  const drop = edgeGood ? "2000000000000000" : "2000000000000000";
 
   return {
     orderHash: hash,
     chainId: 8453,
     orderStatus: "open",
     type: "Dutch_V3",
+    orderType: "Dutch_V3",
     cosignerData: {
+      decayStartBlock: DECAY_START,
+      exclusiveFiller: "0x0000000000000000000000000000000000000000",
+      exclusivityOverrideBps: 0,
+      relativeBlocks: [10, 40],
+      relativeAmounts: [drop, String(BigInt(drop) * 2n)],
+      // keep time fields as secondary fallback only
       decayStartTime: now - 120,
       decayEndTime: now + 480,
-      exclusiveFiller: "0x0000000000000000000000000000000000000000",
     },
     deadline: now + 900,
     input: {
@@ -71,7 +85,7 @@ function makeDutch({ hash, edgeGood }) {
       {
         token: WETH,
         startAmount: outStart,
-        endAmount: outEnd,
+        endAmount: outStart, // V3 obligation comes from curve, not endAmount
         recipient: "0x0000000000000000000000000000000000000001",
       },
     ],
@@ -88,7 +102,9 @@ function makePriority(hash) {
 
 function makeExclusive(hash) {
   const o = makeDutch({ hash, edgeGood: true });
-  o.cosignerData.exclusiveFiller = "0x1111111111111111111111111111111111111111";
+  o.cosignerData.exclusiveFiller =
+    "0x1111111111111111111111111111111111111111";
+  o.cosignerData.decayStartBlock = EXCL_DECAY_START;
   return o;
 }
 
@@ -138,7 +154,9 @@ console.error(
     cycles: CYCLES,
     intervalSec: INTERVAL_SEC,
     journalPath,
-    note: "synthetic orders · real pipeline · VirtualBooks seeded",
+    note: "synthetic Dutch_V3 block curve · real pipeline · VirtualBooks",
+    simBlock: SIM_BLOCK,
+    decayStartBlock: DECAY_START,
     liveCapital: false,
     booksSeed: virtualBooks.snapshot(),
   })
@@ -153,6 +171,8 @@ for (let c = 1; c <= CYCLES; c++) {
       orderType: "Dutch_V3",
       fetchFn: mockFetch(c),
       referenceCostFn: simReferenceCost,
+      currentBlock: SIM_BLOCK,
+      skipBlockNumber: true,
     }
   );
 
@@ -164,6 +184,8 @@ for (let c = 1; c <= CYCLES; c++) {
       stage: "poll",
       simulated: true,
       orderType: "Dutch_V3",
+      resolveClock: "v3_block",
+      currentBlock: String(SIM_BLOCK),
       raw: String(result.rawCount),
       accepted: String(result.accepted),
       rejected: String(result.rejected),
@@ -184,6 +206,7 @@ for (let c = 1; c <= CYCLES; c++) {
       accepted: result.accepted,
       rejected: result.rejected,
       waited: result.waited,
+      currentBlock: result.currentBlock ?? SIM_BLOCK,
       journalSize: journal.size(),
       file: journalPath,
       books: result.booksSnapshot ?? null,

@@ -6,8 +6,10 @@ export async function getMeta() {
   return r.json();
 }
 
-export async function getLatest(limit = 300) {
-  const r = await fetch(`${BASE}/journals/latest?limit=${limit}`);
+export async function getLatest(limit = 300, file?: string | null) {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (file) q.set("file", file);
+  const r = await fetch(`${BASE}/journals/latest?${q}`);
   if (!r.ok) throw new Error(`latest_${r.status}`);
   return r.json();
 }

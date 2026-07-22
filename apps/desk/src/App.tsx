@@ -22,16 +22,18 @@ export function App() {
   const [clock, setClock] = useState(() => new Date().toISOString().slice(11, 19));
   const [prevCount, setPrevCount] = useState(0);
   const [pulseKey, setPulseKey] = useState(0);
+  /** Force a journal file; null = API pickBestJournal. */
+  const [forcedFile, setForcedFile] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const [m, l, f] = await Promise.all([
         getMeta(),
-        getLatest(600),
+        getLatest(600, forcedFile),
         getJournalFiles(),
       ]);
       const n = l?.records?.length ?? 0;
-      if (n > prevCount) setPulseKey((k) => k + 1);
+      if (n !== prevCount) setPulseKey((k) => k + 1);
       setPrevCount(n);
       setMeta(m);
       setLatest(l);
@@ -40,7 +42,7 @@ export function App() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
-  }, [prevCount]);
+  }, [prevCount, forcedFile]);
 
   useEffect(() => {
     refresh();
@@ -64,6 +66,7 @@ export function App() {
   const go = meta?.goNoGo;
   const activity = Math.min(1, 0.25 + (summary?.n ?? 0) / 80);
   const modeLabel = meta?.mode?.label ?? "VIEW";
+  const activeFile = latest?.file?.name ?? forcedFile;
 
   return (
     <div className="layout">
@@ -124,6 +127,14 @@ export function App() {
               <span>write</span>
               <span className="good">OFF</span>
             </div>
+            <div className="metric-row">
+              <span>journal</span>
+              <span className="good" title={activeFile ?? ""}>
+                {activeFile
+                  ? activeFile.replace(/\.jsonl$/, "").slice(0, 22)
+                  : "—"}
+              </span>
+            </div>
           </div>
 
           <div className="panel panel-rise">
@@ -172,11 +183,35 @@ export function App() {
 
           <div className="panel panel-rise">
             <h2>Journals</h2>
-            <ul className="clean">
-              {files.slice(0, 3).map((f) => (
+            <p className="muted" style={{ fontSize: 11, margin: "0 0 8px" }}>
+              click to load · auto prefers accepts
+            </p>
+            <ul className="clean journal-pick">
+              <li>
+                <button
+                  type="button"
+                  className={!forcedFile ? "journal-btn on" : "journal-btn"}
+                  onClick={() => setForcedFile(null)}
+                >
+                  auto (best)
+                </button>
+              </li>
+              {files.slice(0, 6).map((f) => (
                 <li key={f.name}>
-                  {f.name}
-                  <div className="muted">{f.bytes} B</div>
+                  <button
+                    type="button"
+                    className={
+                      forcedFile === f.name || activeFile === f.name
+                        ? "journal-btn on"
+                        : "journal-btn"
+                    }
+                    title={f.name}
+                    onClick={() => setForcedFile(f.name)}
+                  >
+                    {f.name.startsWith("sim-") ? "sim " : "live "}
+                    {f.name.replace(/^sim-base-dutch-/, "").replace(/^dry-run-base-mainnet-/, "").replace(/\.jsonl$/, "").slice(0, 18)}
+                    <div className="muted">{f.bytes} B</div>
+                  </button>
                 </li>
               ))}
             </ul>
