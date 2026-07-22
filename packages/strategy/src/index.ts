@@ -40,3 +40,9 @@ export {
   type DutchAuctionInput,
   type DutchAuctionResult,
 } from "./dutch-auction.js";
+export {
+  floatLinearDecay,
+  floatEdgeBps,
+  compareDecayAndEdge,
+  type MathCompareRow,
+} from "./float-compare.js";
