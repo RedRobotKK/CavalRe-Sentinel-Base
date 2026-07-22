@@ -89,3 +89,16 @@ export {
   FloatLibError,
   type Float,
 } from "./floatlib.js";
+export {
+  LIVE_MODE_ERROR,
+  DEFAULT_GO_NO_GO,
+  isGoNoGoSatisfied,
+  missingGoNoGoGates,
+  assertModeAllowed,
+  canEnableLive,
+  PHASE_D_LIVE_LIMITS,
+  PHASE_D_PLAN,
+  type GoNoGoEvidence,
+  type PhaseDDeploymentPlan,
+  type RunnerMode,
+} from "./phase-d-live.js";
