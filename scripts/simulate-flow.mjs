@@ -1,20 +1,14 @@
 #!/usr/bin/env node
 /**
  * Simulate UniswapX order flow through the REAL decision path.
- *
- * - Does not call mainnet UniswapX API
- * - Does not broadcast txs or use keys
- * - Uses parse → classify → decay → edge → risk → policy → journal
- *
- * Usage:
- *   npm run simulate
- *   npm run simulate -- --cycles 20 --interval 2
+ * Seeds VirtualBooks so quote_accepted posts inventory.
  */
 
 import { mkdir, appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DecisionJournal } from "@cavalre/journal";
 import { RiskEngine, defaultSmallCapitalConfig } from "@cavalre/risk-engine";
+import { VirtualBooks } from "@cavalre/strategy";
 import { runCycle } from "@cavalre/runner";
 
 const args = process.argv.slice(2);
@@ -32,18 +26,19 @@ const EMPTY_EVERY = Number(flag("emptyEvery", "4"));
 const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const WETH = "0x4200000000000000000000000000000000000006";
 
-// defaultSmallCapitalConfig maxPosition = 80_000000 ($80 @ 6dp).
-// Stay under that so risk allows the quote.
-const IN_USDC = "50000000"; // $50
-// ~0.02 ETH @ ~$2500 — edgeGood owes less than ref
-const OUT_GOOD_START = "20000000000000000"; // 0.020 ETH
-const OUT_GOOD_END = "18000000000000000"; // 0.018 ETH
-const OUT_BAD_START = "25000000000000000"; // 0.025 ETH
+const IN_USDC = "50000000";
+const OUT_GOOD_START = "20000000000000000";
+const OUT_GOOD_END = "18000000000000000";
+const OUT_BAD_START = "25000000000000000";
 const OUT_BAD_END = "23000000000000000";
-const REF_OUT = 22000000000000000n; // 0.022 ETH — good edge vs 0.020, bad vs 0.025
+const REF_OUT = 22000000000000000n;
 
 const risk = new RiskEngine(defaultSmallCapitalConfig());
 const journal = new DecisionJournal();
+const virtualBooks = new VirtualBooks();
+// Seed output inventory so postAccept can debit WETH on accept
+virtualBooks.seed(WETH, 100_000000000000000000n); // 100 ETH research inventory
+virtualBooks.seed(USDC, 1_000_000_000000n); // spare USDC sleeve
 
 function stamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
@@ -62,7 +57,7 @@ function makeDutch({ hash, edgeGood }) {
     orderStatus: "open",
     type: "Dutch_V3",
     cosignerData: {
-      decayStartTime: now - 120, // ~20% into window → past early-decay gate
+      decayStartTime: now - 120,
       decayEndTime: now + 480,
       exclusiveFiller: "0x0000000000000000000000000000000000000000",
     },
@@ -99,7 +94,6 @@ function makeExclusive(hash) {
 
 function scenarioOrders(cycle) {
   if (cycle % EMPTY_EVERY === 0) return [];
-
   const n = cycle + 1;
   const orders = [
     makeDutch({ hash: `0xsimdutch${n}a`.padEnd(66, "0"), edgeGood: true }),
@@ -123,7 +117,6 @@ function mockFetch(cycle) {
   };
 }
 
-/** Fixed ref so edgeGood accepts and edgeBad rejects/waits. */
 async function simReferenceCost() {
   return REF_OUT;
 }
@@ -145,15 +138,16 @@ console.error(
     cycles: CYCLES,
     intervalSec: INTERVAL_SEC,
     journalPath,
-    note: "synthetic orders · real pipeline · not mainnet",
+    note: "synthetic orders · real pipeline · VirtualBooks seeded",
     liveCapital: false,
+    booksSeed: virtualBooks.snapshot(),
   })
 );
 
 for (let c = 1; c <= CYCLES; c++) {
   const before = journal.size();
   const result = await runCycle(
-    { risk, journal },
+    { risk, journal, virtualBooks },
     {
       pollLimit: 20,
       orderType: "Dutch_V3",
@@ -192,6 +186,7 @@ for (let c = 1; c <= CYCLES; c++) {
       waited: result.waited,
       journalSize: journal.size(),
       file: journalPath,
+      books: result.booksSnapshot ?? null,
     })
   );
 
@@ -206,5 +201,6 @@ console.error(
     message: "simulate-flow done",
     journalPath,
     journalSize: journal.size(),
+    booksFinal: virtualBooks.snapshot(),
   })
 );

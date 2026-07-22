@@ -2,15 +2,12 @@
 /**
  * Local journal API for Sentinel Desk.
  * Binds 127.0.0.1 only. Read-only. No keys.
- *
- * Mode model:
- *   VIEW  = real UniswapX + Base RPC (via dry-run), no signing
- *   WRITE = only when wallet env present AND live path enabled (not yet)
  */
 
 import { createServer } from "node:http";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, basename } from "node:path";
+import { resolveWalletSession, walletPublicContext } from "@cavalre/wallet";
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.DESK_API_PORT ?? 8787);
@@ -29,8 +26,8 @@ function operatingMode() {
     process.env.SENTINEL_LIVE === "1" || process.env.SENTINEL_LIVE === "true";
   if (hasKey && liveFlag) {
     return {
-      mode: "write",
-      label: "WRITE",
+      mode: "view",
+      label: "VIEW",
       liveCapital: false,
       note: "credentials present but runner live path not enabled",
     };
@@ -40,7 +37,7 @@ function operatingMode() {
       mode: "view",
       label: "VIEW",
       liveCapital: false,
-      note: "wallet env present; still VIEW until SENTINEL_LIVE=1 + code path",
+      note: "wallet env present; still VIEW until Go/No-Go + live path",
     };
   }
   return {
@@ -48,6 +45,37 @@ function operatingMode() {
     label: "VIEW",
     liveCapital: false,
     note: "real sources, no credentials, no broadcast",
+  };
+}
+
+/**
+ * Desk wallet posture — never loads private keys into API process for display.
+ * Keys in env only flip credentialsPresent note; posture stays view/none until live path.
+ */
+function walletLifecycleMeta() {
+  const displayAddress = process.env.SENTINEL_ADDRESS ?? null;
+  const hasKey = Boolean(
+    process.env.SENTINEL_PRIVATE_KEY || process.env.FILLER_PRIVATE_KEY
+  );
+  // Desk API does not construct LocalSigner — no key material in this process for /meta
+  const session = resolveWalletSession({
+    phase: "C",
+    displayAddress,
+    signer: null,
+    goNoGoSatisfied: false,
+  });
+  const pub = walletPublicContext(session);
+  return {
+    ...pub,
+    liveSigning: false,
+    writeEnabled: false,
+    browserKeys: false,
+    credentialsPresent: hasKey,
+    addressConfigured: Boolean(displayAddress),
+    note:
+      pub.walletPosture === "view"
+        ? "display address only · liveCapital=false"
+        : "no wallet configured · research VIEW",
   };
 }
 
@@ -89,24 +117,18 @@ async function loadJsonl(filePath, { limit = 500 } = {}) {
   return { totalLines: lines.length, records };
 }
 
-/** Count decision rows (not heartbeats). */
 function decisionScore(records) {
   let n = 0;
   for (const r of records) {
     if (r.kind === "quote_accepted" || r.kind === "quote_rejected") n += 2;
     else if (r.kind === "info" && r.context?.policyAction) n += 1;
-    else if (r.reason === "cycle_heartbeat") n += 0;
   }
   return n;
 }
 
-/**
- * Prefer a recent journal that actually has decisions.
- * Falls back to newest mtime if everything is heartbeat-only.
- */
 async function pickBestJournal(files, { limit = 400 } = {}) {
   if (files.length === 0) return null;
-  const windowMs = 6 * 60 * 60 * 1000; // last 6h
+  const windowMs = 6 * 60 * 60 * 1000;
   const now = Date.now();
   const recent = files.filter((f) => now - f.mtimeMs < windowMs);
   const pool = recent.length > 0 ? recent : files.slice(0, 8);
@@ -117,13 +139,12 @@ async function pickBestJournal(files, { limit = 400 } = {}) {
     try {
       const { records } = await loadJsonl(f.path, { limit });
       const score = decisionScore(records);
-      // Prefer decisions; break ties by recency (pool already mtime-sorted)
       if (score > bestScore) {
         bestScore = score;
         best = f;
       }
     } catch {
-      /* skip unreadable */
+      /* skip */
     }
   }
   return best;
@@ -169,11 +190,9 @@ function summarize(records) {
       r.context?.policyAction ??
       (r.kind === "quote_accepted"
         ? "accept"
-        : r.kind === "info" && r.context?.policyAction === "wait"
-          ? "wait"
-          : r.kind === "quote_rejected"
-            ? "reject"
-            : null);
+        : r.kind === "quote_rejected"
+          ? "reject"
+          : null);
     if (action) {
       byAction[action] = (byAction[action] ?? 0) + 1;
       if (action === "accept") accepts += 1;
@@ -186,8 +205,7 @@ function summarize(records) {
     byReason[reason] = (byReason[reason] ?? 0) + 1;
 
     if (r.kind === "markout" || r.markoutBps != null || r.context?.markoutBps != null) {
-      const raw = r.markoutBps ?? r.context?.markoutBps;
-      const bps = Number(raw);
+      const bps = Number(r.markoutBps ?? r.context?.markoutBps);
       if (Number.isFinite(bps)) {
         markoutN += 1;
         markoutSum += bps;
@@ -216,10 +234,7 @@ function summarize(records) {
       losses,
       hitRateBps: labeled > 0 ? Math.round((wins * 10000) / labeled) : null,
       meanMarkoutBps: markoutN > 0 ? Math.round(markoutSum / markoutN) : null,
-      note:
-        markoutN === 0
-          ? "insufficient_markout_sample"
-          : "markout_labeled",
+      note: markoutN === 0 ? "insufficient_markout_sample" : "markout_labeled",
     },
   };
 }
@@ -231,17 +246,8 @@ function buildGoNoGo(all) {
   const uniqueRefs = new Set(accepts.map((r) => r.ref).filter(Boolean));
   const markouts = [];
   for (const r of all.records) {
-    if (r.kind !== "markout" && r.markoutBps == null) continue;
-    const w = r.markout?.windowSec ?? Number(r.context?.windowSec);
-    if (w !== 120 && Number.isFinite(w)) continue;
     const bps = Number(r.markoutBps ?? r.markout?.markoutBps ?? r.context?.markoutBps);
     if (Number.isFinite(bps)) markouts.push(bps);
-  }
-  if (markouts.length === 0) {
-    for (const r of all.records) {
-      const bps = Number(r.markoutBps ?? r.markout?.markoutBps ?? r.context?.markoutBps);
-      if (Number.isFinite(bps)) markouts.push(bps);
-    }
   }
   const mean =
     markouts.length > 0
@@ -317,25 +323,6 @@ const RISK_DEFAULTS = {
   note: "USDC 6dp units for $1000 book in defaultSmallCapitalConfig",
 };
 
-function walletStatus() {
-  const op = operatingMode();
-  const addr = process.env.SENTINEL_ADDRESS ?? null;
-  const hasKey = Boolean(
-    process.env.SENTINEL_PRIVATE_KEY || process.env.FILLER_PRIVATE_KEY
-  );
-  return {
-    mode: op.mode,
-    label: op.label,
-    liveSigning: false,
-    writeEnabled: false,
-    browserKeys: false,
-    credentialsPresent: hasKey,
-    addressConfigured: Boolean(addr),
-    address: addr,
-    note: op.note,
-  };
-}
-
 function sourcesStatus() {
   return {
     uniswapx: {
@@ -376,6 +363,7 @@ async function handle(req, res) {
         ui: "http://127.0.0.1:5173",
         phase: "0.5",
         mode: operatingMode(),
+        wallet: walletLifecycleMeta(),
         sources: sourcesStatus(),
         endpoints: [
           "GET /health",
@@ -425,13 +413,13 @@ async function handle(req, res) {
         risk: RISK_DEFAULTS,
         goNoGo: buildGoNoGo(all),
         sources: sourcesStatus(),
-        wallet: walletStatus(),
+        wallet: walletLifecycleMeta(),
       });
       return;
     }
 
     if (url.pathname === "/wallet") {
-      json(res, walletStatus());
+      json(res, walletLifecycleMeta());
       return;
     }
 
@@ -510,6 +498,7 @@ createServer(handle).listen(PORT, HOST, () => {
       url: `http://${HOST}:${PORT}`,
       journalDir: JOURNAL_DIR,
       mode: operatingMode().label,
+      wallet: walletLifecycleMeta(),
       sources: sourcesStatus(),
       phase: "0.5",
     })
