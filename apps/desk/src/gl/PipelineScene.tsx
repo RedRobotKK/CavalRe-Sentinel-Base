@@ -22,7 +22,7 @@ const STAGE_HEX = [
   0xffb84d, 0xffa833, 0xff9a1a, 0xff8c1a, 0xff7a22, 0xff6a18, 0xff5533, 0xffcc66,
 ];
 
-function makeLabelTexture(s: StageVisual, active: boolean, lit: boolean): THREE.CanvasTexture {
+function makeLabelTexture(s: StageVisual, active: boolean, hit: number): THREE.CanvasTexture {
   const w = 512;
   const h = 400;
   const canvas = document.createElement("canvas");
@@ -30,25 +30,26 @@ function makeLabelTexture(s: StageVisual, active: boolean, lit: boolean): THREE.
   canvas.height = h;
   const ctx = canvas.getContext("2d")!;
 
-  const on = active || lit;
-  const top = on ? "#4a2810" : "#1c120a";
-  const bot = on ? "#201008" : "#0c0804";
+  const lift = Math.min(1, hit);
+  const top = active || lift > 0.05 ? blendHex("#3a2010", "#6a4020", lift) : "#1c120a";
+  const bot = active || lift > 0.05 ? blendHex("#180c04", "#402010", lift) : "#0c0804";
   const grd = ctx.createLinearGradient(0, 0, 0, h);
   grd.addColorStop(0, top);
   grd.addColorStop(1, bot);
   ctx.fillStyle = grd;
   ctx.fillRect(0, 0, w, h);
 
-  ctx.strokeStyle = active ? "#ffd080" : lit ? "#c47a22" : "#8a5a1e";
-  ctx.lineWidth = active ? 11 : 7;
+  const border = lift > 0.25 ? "#ffe0a0" : active ? "#ffc266" : "#8a5a1e";
+  ctx.strokeStyle = border;
+  ctx.lineWidth = active || lift > 0.2 ? 12 : 7;
   ctx.strokeRect(12, 12, w - 24, h - 24);
 
-  ctx.fillStyle = active ? "#fff0c8" : "#ffb84d";
+  ctx.fillStyle = lift > 0.35 ? "#fff4d0" : active ? "#ffe0a0" : "#ffb84d";
   ctx.font = "bold 64px \"IBM Plex Mono\", ui-monospace, monospace";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.shadowColor = active ? "rgba(255,176,0,0.35)" : "transparent";
-  ctx.shadowBlur = active ? 10 : 0;
+  ctx.shadowColor = "rgba(255,176,0,0.45)";
+  ctx.shadowBlur = active || lift > 0.15 ? 14 : 0;
   ctx.fillText(s.label, w / 2, 95);
 
   ctx.fillStyle = "#ffb000";
@@ -66,6 +67,21 @@ function makeLabelTexture(s: StageVisual, active: boolean, lit: boolean): THREE.
   return tex;
 }
 
+function blendHex(a: string, b: string, t: number): string {
+  const pa = parseInt(a.slice(1), 16);
+  const pb = parseInt(b.slice(1), 16);
+  const ar = (pa >> 16) & 255,
+    ag = (pa >> 8) & 255,
+    ab = pa & 255;
+  const br = (pb >> 16) & 255,
+    bg = (pb >> 8) & 255,
+    bb = pb & 255;
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const bl = Math.round(ab + (bb - ab) * t);
+  return `rgb(${r},${g},${bl})`;
+}
+
 function makeHexRainTexture(): THREE.CanvasTexture {
   const w = 64;
   const h = 256;
@@ -78,7 +94,7 @@ function makeHexRainTexture(): THREE.CanvasTexture {
   ctx.font = "14px monospace";
   ctx.textAlign = "center";
   for (let y = 0; y < 18; y++) {
-    ctx.fillStyle = `rgba(255, ${140 + (y % 5) * 15}, 30, ${0.12 + (y % 3) * 0.06})`;
+    ctx.fillStyle = `rgba(255, ${140 + (y % 5) * 15}, 30, ${0.15 + (y % 3) * 0.08})`;
     ctx.fillText(chars[(y * 7) % 16]!, w / 2, 14 + y * 14);
   }
   const tex = new THREE.CanvasTexture(canvas);
@@ -119,24 +135,32 @@ export function PipelineScene({
       powerPreference: "high-performance",
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // fully transparent clear so phosphor wire behind the canvas is visible
     renderer.setClearColor(0x000000, 0);
     renderer.domElement.className = "pipeline-scene-canvas";
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x060301, 0.018);
+    // no FogExp2 — it painted an opaque veil over the CRT feed
 
     const camera = new THREE.PerspectiveCamera(36, 2, 0.1, 100);
     camera.position.set(0, 4.4, 13.5);
     camera.lookAt(0, 0.35, 0);
 
     scene.add(new THREE.AmbientLight(0xff9a1a, 0.55));
-    const key = new THREE.PointLight(0xffc266, 2.2, 55);
+    const key = new THREE.PointLight(0xffc266, 2.4, 55);
     key.position.set(0, 7, 8);
     scene.add(key);
 
+    const hitLights: THREE.PointLight[] = [];
     const spacing = 2.5;
     const x0 = -((N - 1) * spacing) / 2;
+    for (let i = 0; i < N; i++) {
+      const pl = new THREE.PointLight(STAGE_HEX[i] ?? 0xffb000, 0, 4.2);
+      pl.position.set(x0 + i * spacing, 1.15, 0.55);
+      scene.add(pl);
+      hitLights.push(pl);
+    }
 
     const grid = new THREE.GridHelper(48, 48, 0x6a3a10, 0x1e1208);
     grid.position.y = -1.55;
@@ -144,11 +168,11 @@ export function PipelineScene({
     if (Array.isArray(gm)) {
       gm.forEach((m) => {
         m.transparent = true;
-        m.opacity = 0.28;
+        m.opacity = 0.22;
       });
     } else {
       gm.transparent = true;
-      gm.opacity = 0.28;
+      gm.opacity = 0.22;
     }
     scene.add(grid);
 
@@ -162,7 +186,7 @@ export function PipelineScene({
       const mat = new THREE.MeshBasicMaterial({
         color: 0xff9f1a,
         transparent: true,
-        opacity: 0.06 + i * 0.012,
+        opacity: 0.07 + i * 0.015,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       });
@@ -179,7 +203,7 @@ export function PipelineScene({
       const mat = new THREE.MeshBasicMaterial({
         map: rainTex,
         transparent: true,
-        opacity: 0.08,
+        opacity: 0.1,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
@@ -189,7 +213,7 @@ export function PipelineScene({
       bg.add(plane);
     }
 
-    const NEB = 180;
+    const NEB = 220;
     const nebPos = new Float32Array(NEB * 3);
     for (let i = 0; i < NEB; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -205,9 +229,9 @@ export function PipelineScene({
         nebGeo,
         new THREE.PointsMaterial({
           color: 0xc47a22,
-          size: 0.05,
+          size: 0.055,
           transparent: true,
-          opacity: 0.25,
+          opacity: 0.3,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
           sizeAttenuation: true,
@@ -215,29 +239,31 @@ export function PipelineScene({
       )
     );
 
+    const nodes: THREE.Mesh[] = [];
     const materials: THREE.MeshStandardMaterial[] = [];
     const textures: THREE.CanvasTexture[] = [];
-    const emissiveSmooth = new Float32Array(N);
+    const hitAmt = new Float32Array(N);
     const boxGeo = new THREE.BoxGeometry(1.75, 1.45, 0.62);
 
     for (let i = 0; i < N; i++) {
       const sv = stagesRef.current[i] ?? DEFAULT_STAGES[i]!;
-      const tex = makeLabelTexture(sv, false, false);
+      const tex = makeLabelTexture(sv, false, 0);
       textures.push(tex);
       const mat = new THREE.MeshStandardMaterial({
         map: tex,
         emissive: new THREE.Color(STAGE_HEX[i] ?? 0xff8c1a),
-        emissiveIntensity: 0.18,
+        emissiveIntensity: 0.2,
         emissiveMap: tex,
-        metalness: 0.32,
-        roughness: 0.48,
+        metalness: 0.35,
+        roughness: 0.42,
       });
-      emissiveSmooth[i] = 0.18;
       materials.push(mat);
       const mesh = new THREE.Mesh(boxGeo, mat);
       mesh.position.set(x0 + i * spacing, 0.42, 0);
       mesh.rotation.x = -0.12;
+      mesh.scale.setScalar(1);
       scene.add(mesh);
+      nodes.push(mesh);
     }
 
     type Stream = {
@@ -251,7 +277,7 @@ export function PipelineScene({
     };
 
     const streams: Stream[] = [];
-    const PIXELS_PER_LINK = 20;
+    const PIXELS_PER_LINK = 28;
 
     for (let i = 0; i < N - 1; i++) {
       const xA = x0 + i * spacing + 0.92;
@@ -260,12 +286,12 @@ export function PipelineScene({
 
       const fwd = new THREE.CatmullRomCurve3([
         new THREE.Vector3(xA, 0.5, 0.12),
-        new THREE.Vector3(mid, 0.9, 0.22),
+        new THREE.Vector3(mid, 0.95 + (i % 3) * 0.05, 0.28),
         new THREE.Vector3(xB, 0.5, 0.12),
       ]);
       const rev = new THREE.CatmullRomCurve3([
         new THREE.Vector3(xB, 0.22, -0.1),
-        new THREE.Vector3(mid, 0.45, -0.18),
+        new THREE.Vector3(mid, 0.48, -0.22),
         new THREE.Vector3(xA, 0.22, -0.1),
       ]);
 
@@ -278,16 +304,16 @@ export function PipelineScene({
         const speed = new Float32Array(count);
         for (let p = 0; p < count; p++) {
           u[p] = p / count;
-          speed[p] = 0.14 + Math.random() * 0.22;
+          speed[p] = 0.18 + Math.random() * 0.35 + (dir === 0 ? 0.08 : 0);
         }
         const geo = new THREE.BufferGeometry();
         geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(count * 3), 3));
         const col = new THREE.Color(dir === 0 ? STAGE_HEX[i]! : 0x66ffaa);
         const mat = new THREE.PointsMaterial({
           color: col,
-          size: dir === 0 ? 0.07 : 0.055,
+          size: dir === 0 ? 0.085 : 0.065,
           transparent: true,
-          opacity: 0.7,
+          opacity: 0.85,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
           sizeAttenuation: true,
@@ -299,11 +325,11 @@ export function PipelineScene({
 
       scene.add(
         new THREE.Mesh(
-          new THREE.TubeGeometry(fwd, 20, 0.014, 5, false),
+          new THREE.TubeGeometry(fwd, 20, 0.016, 5, false),
           new THREE.MeshBasicMaterial({
             color: 0xff9f1a,
             transparent: true,
-            opacity: 0.07,
+            opacity: 0.08,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
           })
@@ -320,7 +346,7 @@ export function PipelineScene({
     const busMat = new THREE.MeshBasicMaterial({
       color: 0xff9f1a,
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.25,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -333,12 +359,12 @@ export function PipelineScene({
     let burst = 0;
     const t0 = performance.now();
     const tmp = new THREE.Vector3();
+    const white = new THREE.Color(0xfff0c0);
 
     const refreshTextures = (active: number) => {
       for (let i = 0; i < N; i++) {
         const sv = stagesRef.current[i] ?? DEFAULT_STAGES[i]!;
-        const lit = i <= active;
-        const tex = makeLabelTexture(sv, i === active, lit);
+        const tex = makeLabelTexture(sv, i === active, hitAmt[i]!);
         textures[i]?.dispose();
         textures[i] = tex;
         const mat = materials[i]!;
@@ -368,30 +394,45 @@ export function PipelineScene({
       if (pulseRef.current !== lastPulse) {
         lastPulse = pulseRef.current;
         burst = 1;
+        for (const s of streams) {
+          if (s.from < active) {
+            for (let p = 0; p < 4; p++) {
+              s.u[p] = Math.random() * 0.15;
+              s.speed[p] = 0.55 + Math.random() * 0.4;
+            }
+          }
+        }
       }
-      // slow, calm decay — not a strobe
-      burst = Math.max(0, burst - 0.02);
+      burst *= 0.93;
 
-      // texture only when stage index or counts change (not every frame)
       const sig =
-        active + "|" + stagesRef.current.map((s) => `${s.pass}:${s.drop}`).join(",");
+        active +
+        "|" +
+        stagesRef.current.map((s) => `${s.pass}:${s.drop}`).join(",") +
+        "|" +
+        Array.from(hitAmt, (h) => (h > 0.05 ? "1" : "0")).join("");
       if (sig !== lastStageSig) {
         lastStageSig = sig;
         refreshTextures(active);
       }
 
-      camera.position.x = Math.sin(t * 0.04) * 0.08;
+      camera.position.x = Math.sin(t * 0.05) * 0.1;
       camera.lookAt(0, 0.4, 0);
 
       orbits.forEach((o, i) => {
-        o.rotation.z = t * (0.03 + i * 0.01) * (i % 2 === 0 ? 1 : -1);
+        o.rotation.z = t * (0.04 + i * 0.015) * (i % 2 === 0 ? 1 : -1);
       });
-      rainTex.offset.y = (t * 0.08) % 1;
+      rainTex.offset.y = (t * 0.12) % 1;
+
+      for (let i = 0; i < N; i++) {
+        hitAmt[i] = Math.max(0, hitAmt[i]! * 0.92);
+      }
 
       for (const s of streams) {
         const lit = s.from < active || s.from === active - 1;
         const mat = s.pts.material as THREE.PointsMaterial;
-        mat.opacity = lit ? 0.75 : 0.15;
+        mat.opacity = lit ? 0.88 : 0.2;
+        mat.size = lit ? (s.dir === 0 ? 0.09 : 0.07) : 0.045;
 
         if (s.dir === 1) {
           const next = stagesRef.current[s.from + 1];
@@ -402,31 +443,40 @@ export function PipelineScene({
 
         const attr = s.pts.geometry.attributes.position as THREE.BufferAttribute;
         for (let p = 0; p < s.count; p++) {
-          let u = s.u[p]! + s.speed[p]! * 0.014 * (lit ? 1.15 : 0.35);
-          if (u >= 1) u = u - 1;
+          let u = s.u[p]! + s.speed[p]! * 0.016 * (lit ? 1.35 : 0.4);
+          if (u >= 1) {
+            const target = s.dir === 0 ? s.from + 1 : s.from;
+            hitAmt[target] = Math.min(1.2, hitAmt[target]! + 0.45);
+            u = u - 1;
+          }
           s.u[p] = u;
           s.curve.getPointAt(Math.min(0.999, u), tmp);
-          attr.setXYZ(p, tmp.x, tmp.y, tmp.z);
+          const jy = Math.sin(t * 12 + p * 1.7 + s.from) * 0.02;
+          attr.setXYZ(p, tmp.x, tmp.y + jy, tmp.z);
         }
         attr.needsUpdate = true;
       }
 
-      // Smooth emissive toward stable targets — no per-particle flash
       for (let i = 0; i < N; i++) {
         const mat = materials[i]!;
         const isOn = i <= active;
         const isCur = i === active;
-        const target =
-          0.16 + (isCur ? 0.22 : isOn ? 0.08 : 0) + burst * (isCur ? 0.12 : 0.03);
-        // critically damped-ish lerp
-        emissiveSmooth[i] =
-          emissiveSmooth[i]! + (target - emissiveSmooth[i]!) * 0.08;
-        mat.emissiveIntensity = emissiveSmooth[i]!;
+        const hit = hitAmt[i]!;
+
+        mat.emissiveIntensity =
+          0.16 + (isCur ? 0.28 : isOn ? 0.1 : 0) + hit * 0.7 + burst * 0.1;
         mat.emissive.setHex(STAGE_HEX[i] ?? 0xff8c1a);
+        if (hit > 0.25) {
+          mat.emissive.lerp(white, Math.min(0.5, hit * 0.35));
+        }
+
+        const hl = hitLights[i]!;
+        hl.intensity = hit * 2.4 + (isCur ? 0.25 : 0);
+        hl.color.setHex(STAGE_HEX[i] ?? 0xffb000);
       }
 
-      busMat.opacity = 0.18 + (active / N) * 0.12;
-      key.intensity = 2.0 + burst * 0.25 + inten * 0.2;
+      busMat.opacity = 0.2 + (active / N) * 0.2 + burst * 0.08;
+      key.intensity = 2.1 + burst * 0.9 + inten * 0.3;
 
       renderer.render(scene, camera);
       raf = requestAnimationFrame(frame);
