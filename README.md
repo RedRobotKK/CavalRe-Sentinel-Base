@@ -34,6 +34,8 @@ Most small fillers either:
 
 This is a **research system** that can become a low-capital residual filler — not a demo that pretends to be production.
 
+**Target use case:** deposit on the order of **1 ETH**, and let Sentinel run residual selection autonomously — *only after* research outcomes say the residual market exists and markouts support it. See [RESEARCH_OUTCOMES.md](docs/RESEARCH_OUTCOMES.md).
+
 ---
 
 ## Current posture
@@ -46,6 +48,7 @@ This is a **research system** that can become a low-capital residual filler — 
 | Go / No-Go | **NO_GO** (default) |
 | Soft toxicity prior | **Disabled** |
 | Phase 0 | **Measuring** residual Dutch_V3 on Base |
+| Research outcome | **INCONCLUSIVE** until Phase 0 closes |
 
 Production trading is **not approved**. See [Security & Quality](docs/SECURITY_QUALITY.md).
 
@@ -71,6 +74,7 @@ Production trading is **not approved**. See [Security & Quality](docs/SECURITY_Q
                              │ only after real residual gates
 ┌────────────────────────────▼────────────────────────────────┐
 │  Phase D  — limited live capital (scaffold, gated)          │
+│  scale toward ~1 ETH autonomy only after stable markouts    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -85,32 +89,27 @@ git clone https://github.com/RedRobotKK/CavalRe-Sentinel-Base.git
 cd CavalRe-Sentinel-Base
 npm install
 
-# Strategy unit tests
 npm run test:strategy
-
-# Quality + security checklist (must be green for research hygiene)
 npm run quality
-
-# Continuous residual measurement (leave running)
 npm run phase0
 ```
 
-In a second terminal:
+Second terminal:
 
 ```bash
-npm run ops:status      # capital + Phase 0 + ML snapshot
-npm run phase0:note     # density / survival / verdict
-npm run phase0:csv      # residual-seen.csv / residual-gone.csv
+npm run ops:status
+npm run phase0:note
+npm run phase0:csv
 ```
 
 ### Simulation & ML (advisory only)
 
 ```bash
-npm run simulate                 # synthetic orders through real decision path
-npm run ml:sim-markout           # offline labels for sim journals
-npm run ml:loop -- --no-simulate # batch coverage + walk-forward
-npm run ml:test                  # 22 pure-function tests
-npm run ml:ingest-all            # scan all journals
+npm run simulate
+npm run ml:sim-markout
+npm run ml:loop -- --no-simulate
+npm run ml:test
+npm run ml:ingest-all
 ```
 
 > Soft prior stays **disabled** until real residual walk-forward AUC ≥ 0.65 and calibration pass. Sim labels do **not** count.
@@ -128,7 +127,7 @@ npm run ml:ingest-all            # scan all journals
 | **D** | Limited live capital scaffold | **Gated** — [GO_NO_GO](docs/GO_NO_GO.md) |
 | **E** | Product surface | After D stability |
 
-Phase D encodes evidence requirements, tight notional limits, and settlement plans. **Default remains NO-GO. No broadcast.**
+Phase D encodes evidence requirements, tight notional limits, and settlement plans. **Default remains NO-GO. No broadcast.** First live size is ≪ 1 ETH; scale only on real markouts.
 
 ---
 
@@ -182,6 +181,7 @@ Until then: **VIEW · WRITE OFF · NO_GO · soft prior disabled.**
 
 | Document | Contents |
 |----------|----------|
+| [RESEARCH_OUTCOMES.md](docs/RESEARCH_OUTCOMES.md) | **Terminal outcomes A/B/C/D, failure modes, 1 ETH path** |
 | [RESEARCH.md](docs/RESEARCH.md) | Daily research playbook |
 | [DATA_MAP.md](docs/DATA_MAP.md) | Journals, producers, ingest path |
 | [SECURITY_QUALITY.md](docs/SECURITY_QUALITY.md) | Threat model, quality gates, readiness |
@@ -197,14 +197,14 @@ Until then: **VIEW · WRITE OFF · NO_GO · soft prior disabled.**
 2. **Measure before building** — features and models justified by journals  
 3. **Fail closed** — missing data, undefined edge, or disabled prior → no action  
 4. **Verify upstream** — UniswapX + CavalRe contracts are source of truth  
-5. **Honest metrics** — NO_SIGNAL is a valid and valuable result  
+5. **Honest metrics** — NO_SIGNAL and NO_GO_SPARSE are valid successful research results  
 
 ---
 
 ## Contributing / research hygiene
 
 ```bash
-npm run quality          # must stay green
+npm run quality
 npm run test:strategy
 npm run ml:test
 ```
