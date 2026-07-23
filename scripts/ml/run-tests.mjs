@@ -2,6 +2,7 @@
 import { extractFeatures, toVector, featureNames, pairBucket, hourEncoding } from "./src/features.js";
 import { generateDataset } from "./src/synthetic.js";
 import { fitLogistic, predictProba, aucScore, walkForward } from "./src/train-baseline.js";
+import { normalizeRecord, journalToMatrix } from "./src/journal-adapter.js";
 
 let passed = 0;
 let failed = 0;
@@ -63,6 +64,42 @@ console.log("\nwalkForward on synthetic");
   const res = walkForward(ds.matrix, ds.labels, 4);
   assert(res.folds.length >= 2, "at least 2 folds");
   assert(res.summary.meanAuc > 0.55, `meanAuc > 0.55 on synthetic (got ${res.summary.meanAuc})`);
+}
+
+console.log("\njournal-adapter");
+{
+  const syn = {
+    notionalUsd: 120,
+    decayProgressBps: 6000,
+    edgeBpsVsAmm: -20,
+    exclusive: false,
+    observedAt: 1700000000,
+    inputToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    outputToken: "0x4200000000000000000000000000000000000006",
+    markout2mBps: -40,
+  };
+  const n1 = normalizeRecord(syn);
+  assert(n1 !== null, "normalize synthetic");
+  assertEq(n1.toxic, 1, "toxic from markout2m ≤ -30");
+
+  const desk = {
+    kind: "quote_accepted",
+    ref: "0xabc",
+    context: {
+      edgeBps: "15",
+      decayProgressBps: "3000",
+      inputToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      policyAction: "accept",
+    },
+    amount: "100000000",
+  };
+  const n2 = normalizeRecord(desk);
+  assert(n2 !== null, "normalize desk record");
+  assert(n2.notionalUsd > 50 && n2.notionalUsd < 150, "USDC notional ~100");
+
+  const mat = journalToMatrix([syn, desk, { garbage: true }]);
+  assert(mat.nLabeled >= 1, "at least one labeled");
+  assert(mat.nUnlabeled >= 1, "desk without markout is unlabeled");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
