@@ -19,6 +19,7 @@
     "phase0:note": "node scripts/phase0-market-note.mjs",
     "phase0:csv": "node scripts/phase0-export-csv.mjs",
     "ops:status": "node scripts/ops-status.mjs",
+    "quality": "node scripts/quality-gates.mjs",
     "ml:pipeline": "node scripts/ml/run-pipeline.mjs",
     "ml:test": "node scripts/ml/run-tests.mjs",
     "ml:ingest": "node scripts/ml/ingest-journal.mjs",

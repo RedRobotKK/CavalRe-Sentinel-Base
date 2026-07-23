@@ -1,0 +1,6 @@
+{
+  "name": "@cavalre/ml-scripts",
+  "private": true,
+  "type": "module",
+  "description": "ESM package boundary for residual ML scripts (silences MODULE_TYPELESS warning)"
+}
