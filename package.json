@@ -21,6 +21,7 @@
     "ml:pipeline": "node scripts/ml/run-pipeline.mjs",
     "ml:test": "node scripts/ml/run-tests.mjs",
     "ml:ingest": "node scripts/ml/ingest-journal.mjs",
+    "ml:ingest-all": "node scripts/ml/ingest-all.mjs",
     "ml:sim-markout": "node scripts/ml/sim-markout.mjs",
     "ml:loop": "node scripts/ml/run-loop.mjs",
     "simulate": "tsx scripts/simulate-flow.mjs",
