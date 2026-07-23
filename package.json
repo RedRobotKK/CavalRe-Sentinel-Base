@@ -16,6 +16,8 @@
     "build": "npm run build --workspaces --if-present",
     "dry-run": "tsx scripts/dry-run-harness.mjs",
     "phase0": "node scripts/phase0-market-check.mjs",
+    "ml:pipeline": "node scripts/ml/run-pipeline.mjs",
+    "ml:test": "node scripts/ml/run-tests.mjs",
     "simulate": "tsx scripts/simulate-flow.mjs",
     "shadow-markout": "tsx scripts/shadow-markout.mjs",
     "flow-report": "tsx scripts/flow-report.mjs",
