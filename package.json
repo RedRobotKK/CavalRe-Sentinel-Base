@@ -19,6 +19,7 @@
     "ml:pipeline": "node scripts/ml/run-pipeline.mjs",
     "ml:test": "node scripts/ml/run-tests.mjs",
     "ml:ingest": "node scripts/ml/ingest-journal.mjs",
+    "ml:sim-markout": "node scripts/ml/sim-markout.mjs",
     "simulate": "tsx scripts/simulate-flow.mjs",
     "shadow-markout": "tsx scripts/shadow-markout.mjs",
     "flow-report": "tsx scripts/flow-report.mjs",
