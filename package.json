@@ -17,6 +17,7 @@
     "dry-run": "tsx scripts/dry-run-harness.mjs",
     "phase0": "node scripts/phase0-market-check.mjs",
     "phase0:note": "node scripts/phase0-market-note.mjs",
+    "ops:status": "node scripts/ops-status.mjs",
     "ml:pipeline": "node scripts/ml/run-pipeline.mjs",
     "ml:test": "node scripts/ml/run-tests.mjs",
     "ml:ingest": "node scripts/ml/ingest-journal.mjs",
